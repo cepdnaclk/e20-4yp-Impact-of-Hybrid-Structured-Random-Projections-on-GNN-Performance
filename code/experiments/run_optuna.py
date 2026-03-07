@@ -101,7 +101,7 @@ def main():
     dataset_names = ['blogcatalog', 'flickr']
     data_root = '../data'
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     print(f"Running on: {device}")
 
     all_results = {}
