@@ -20,7 +20,7 @@ def load_dataset(name, root_dir='./data'):
     """
     name = name.lower()
     
-    if name in ['blogcatalog', 'cora', 'flickr']:
+    if name in ['blogcatalog', 'cora', 'flickr', 'www10k', 'www200k']:
         return _load_mat_data(name, root_dir)
     elif name.startswith('ogb'):
         return _load_ogb_data(name, root_dir)
