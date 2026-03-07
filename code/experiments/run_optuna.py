@@ -98,7 +98,7 @@ def make_objective(adj_tensor, labels, device: torch.device):
 
 
 def main():
-    dataset_names = ['blogcatalog', 'www10k', 'www200k']
+    dataset_names = ['ogbn-arxiv']
     data_root = '../data'
 
     device = torch.device('cpu')
