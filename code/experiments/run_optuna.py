@@ -4,8 +4,10 @@ import torch
 import numpy as np
 import optuna
 
-# Add 'src' to path so we can import FastRP
-sys.path.append(os.path.abspath(os.path.join('..', 'src')))
+# Ensure 'src' is in path, or use absolute imports from root
+src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+if src_path not in sys.path:
+    sys.path.append(src_path)
 
 from loaders import load_dataset
 from fastrp_layer import FastRP
