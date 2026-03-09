@@ -22,6 +22,13 @@ def load_data_for(dataset_name: str, data_root: str, device: torch.device):
                 "Missing flickr.mat. Run: python ../src/get_flickr.py to download and convert it. "
                 "If you already have a .mat file, place it at ../data/flickr.mat."
             )
+    elif dataset_name == 'cora':
+        cora_path = os.path.join(data_root, 'cora.mat')
+        if not os.path.exists(cora_path):
+            raise FileNotFoundError(
+                "Missing cora.mat. Run: python ../src/get_cora.py to download and convert it. "
+                "If you already have a .mat file, place it at ../data/cora.mat."
+            )
 
     print(f"Loading {dataset_name}...")
     adj, features, labels = load_dataset(dataset_name, root_dir=data_root)
@@ -98,7 +105,7 @@ def make_objective(adj_tensor, labels, device: torch.device):
 
 
 def main():
-    dataset_names = ['ogbn-arxiv']
+    dataset_names = ['cora']
     data_root = '../data'
 
     device = torch.device('cpu')
