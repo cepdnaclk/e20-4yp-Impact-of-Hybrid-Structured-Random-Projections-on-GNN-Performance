@@ -31,6 +31,18 @@ def load_data_for(dataset_name: str, data_root: str, device: torch.device):
                 "Missing cora.mat. Run: python ../src/get_cora.py to download and convert it. "
                 "If you already have a .mat file, place it at ../data/cora.mat."
             )
+    elif dataset_name == 'citeseer':
+        citeseer_path = os.path.join(data_root, 'citeseer.mat')
+        if not os.path.exists(citeseer_path):
+            raise FileNotFoundError(
+                "Missing citeseer.mat. Run: python -m src.get_citeseer to download and convert it."
+            )
+    elif dataset_name == 'pubmed':
+        pubmed_path = os.path.join(data_root, 'pubmed.mat')
+        if not os.path.exists(pubmed_path):
+            raise FileNotFoundError(
+                "Missing pubmed.mat. Run: python -m src.get_pubmed to download and convert it."
+            )
 
     print(f"Loading {dataset_name}...")
     adj, features, labels = load_dataset(dataset_name, root_dir=data_root)
@@ -107,7 +119,7 @@ def make_objective(adj_tensor, labels, device: torch.device):
 
 
 def main():
-    dataset_names = ['cora']
+    dataset_names = ['cora', 'citeseer', 'pubmed']
     data_root = '../data'
 
     device = torch.device('cpu')
