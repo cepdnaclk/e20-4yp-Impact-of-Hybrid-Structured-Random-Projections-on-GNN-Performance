@@ -15,6 +15,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.metrics import f1_score, roc_auc_score
 import warnings
+import time
 
 # Suppress warnings from sklearn during Optuna trials
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -99,11 +100,13 @@ def make_objective(adj_tensor, feat_tensor, labels, device: torch.device, varian
         ).to(device)
 
         # 3. Generate Embeddings
+        start_time = time.process_time()
         with torch.no_grad():
             if variant == 'hybrid':
                 embeddings = model(adj_tensor, features=feat_tensor)
             else:
                 embeddings = model(adj_tensor, features=None)
+        cpu_time = time.process_time() - start_time
 
         # 4. Evaluate (Downstream Task)
         X = embeddings.cpu().numpy()
@@ -142,6 +145,7 @@ def make_objective(adj_tensor, feat_tensor, labels, device: torch.device, varian
         trial.set_user_attr('macro_f1', macro_f1)
         trial.set_user_attr('auc', auc)
         trial.set_user_attr('mrr_10', mrr)
+        trial.set_user_attr('cpu_time', cpu_time)
 
         return macro_f1
 
@@ -177,15 +181,17 @@ def main():
                 'best_macro_f1': study.best_value,
                 'best_auc': study.best_trial.user_attrs.get('auc', 0.0),
                 'best_mrr_10': study.best_trial.user_attrs.get('mrr_10', 0.0),
+                'cpu_time': study.best_trial.user_attrs.get('cpu_time', 0.0),
             }
             print(f"Best Hyperparameters for {experiment_key}:", study.best_params)
             print(f"Best Macro-F1 for {experiment_key}:", study.best_value)
             print(f"Associated AUC for {experiment_key}:", all_results[experiment_key]['best_auc'])
             print(f"Associated MRR@10 for {experiment_key}:", all_results[experiment_key]['best_mrr_10'])
+            print(f"Embedding CPU Time (s) for {experiment_key}:", all_results[experiment_key]['cpu_time'])
 
     print("\n=== Summary ===")
     for key, result in all_results.items():
-        print(f"{key}: F1={result['best_macro_f1']:.4f}, AUC={result['best_auc']:.4f}, MRR@10={result['best_mrr_10']:.4f} | params: {result['best_params']}")
+        print(f"{key}: F1={result['best_macro_f1']:.4f}, AUC={result['best_auc']:.4f}, MRR@10={result['best_mrr_10']:.4f}, Time={result['cpu_time']:.4f}s | params: {result['best_params']}")
 
 
 if __name__ == '__main__':
