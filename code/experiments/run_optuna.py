@@ -75,7 +75,7 @@ def load_data_for(dataset_name: str, data_root: str, device: torch.device):
     return adj, features, labels, adj_tensor, feat_tensor
 
 
-def make_objective(adj_tensor, labels, device: torch.device):
+def make_objective(adj_tensor, feat_tensor, labels, device: torch.device, variant: str):
     def objective(trial):
         # 1. Suggest Hyperparameters
         _dim = trial.suggest_categorical('dim', [64, 128, 256, 512])
@@ -85,10 +85,10 @@ def make_objective(adj_tensor, labels, device: torch.device):
 
         # 2. Initialize Model
         model = FastRP(
-            embedding_dim=512,
-            window_size=4,
-            normalization=True,
-            group_size=3,
+            embedding_dim=_dim,
+            window_size=_window_size,
+            normalization=_normalization,
+            group_size=_g,
             input_matrix='trans',
             alpha=-0.6,
             weights=[1.0, 1.0, 7.81, 45.28],
@@ -97,7 +97,10 @@ def make_objective(adj_tensor, labels, device: torch.device):
 
         # 3. Generate Embeddings
         with torch.no_grad():
-            embeddings = model(adj_tensor, features=None)
+            if variant == 'hybrid':
+                embeddings = model(adj_tensor, features=feat_tensor)
+            else:
+                embeddings = model(adj_tensor, features=None)
 
         # 4. Evaluate (Downstream Task)
         X = embeddings.cpu().numpy()
@@ -126,25 +129,32 @@ def main():
     print(f"Running on: {device}")
 
     all_results = {}
+    variants = ['gaussian', 'hybrid']
 
     for dataset_name in dataset_names:
         adj, features, labels, adj_tensor, feat_tensor = load_data_for(dataset_name, data_root, device)
 
-        print(f"\n=== Optuna: {dataset_name} ===")
-        study = optuna.create_study(direction='maximize')
-        objective = make_objective(adj_tensor, labels, device)
-        study.optimize(objective, n_trials=50, show_progress_bar=True)
+        for variant in variants:
+            if variant == 'hybrid' and feat_tensor is None:
+                print(f"Skipping hybrid variant for {dataset_name} due to lack of features.")
+                continue
 
-        all_results[dataset_name] = {
-            'best_params': study.best_params,
-            'best_macro_f1': study.best_value,
-        }
-        print("Best Hyperparameters:", study.best_params)
-        print("Best Macro-F1:", study.best_value)
+            experiment_key = f"{dataset_name} ({variant})"
+            print(f"\n=== Optuna: {experiment_key} ===")
+            study = optuna.create_study(direction='maximize')
+            objective = make_objective(adj_tensor, feat_tensor, labels, device, variant)
+            study.optimize(objective, n_trials=50, show_progress_bar=True)
+
+            all_results[experiment_key] = {
+                'best_params': study.best_params,
+                'best_macro_f1': study.best_value,
+            }
+            print(f"Best Hyperparameters for {experiment_key}:", study.best_params)
+            print(f"Best Macro-F1 for {experiment_key}:", study.best_value)
 
     print("\n=== Summary ===")
-    for name, result in all_results.items():
-        print(f"{name}: {result['best_macro_f1']:.4f} | params: {result['best_params']}")
+    for key, result in all_results.items():
+        print(f"{key}: {result['best_macro_f1']:.4f} | params: {result['best_params']}")
 
 
 if __name__ == '__main__':
