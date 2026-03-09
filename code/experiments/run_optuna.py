@@ -13,8 +13,11 @@ from loaders import load_dataset
 from fastrp_layer import FastRP
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, roc_auc_score
+import warnings
 
+# Suppress warnings from sklearn during Optuna trials
+warnings.filterwarnings('ignore', category=UserWarning)
 
 def load_data_for(dataset_name: str, data_root: str, device: torch.device):
     if dataset_name == 'flickr':
@@ -114,8 +117,32 @@ def make_objective(adj_tensor, feat_tensor, labels, device: torch.device, varian
         clf = OneVsRestClassifier(LogisticRegression(solver='liblinear', max_iter=100))
         clf.fit(X[indices[:split]], Y[indices[:split]])
         y_pred = clf.predict(X[indices[split:]])
+        y_prob = clf.predict_proba(X[indices[split:]])
 
         macro_f1 = f1_score(Y[indices[split:]], y_pred, average='macro')
+        
+        # Calculate ROC-AUC (One-vs-Rest, Macro)
+        try:
+            auc = roc_auc_score(Y[indices[split:]], y_prob, average='macro', multi_class='ovr')
+        except ValueError:
+            auc = 0.0 # Fallback if a class is entirely missing from the split
+
+        # Calculate MRR@10
+        mrr = 0.0
+        for i, true_label in enumerate(Y[indices[split:]]):
+            # Get the top 10 predicted classes sorted by probability (descending)
+            top_10_indices = np.argsort(y_prob[i])[::-1][:10]
+            # Find the rank of the true label
+            if true_label in top_10_indices:
+                rank = np.where(top_10_indices == true_label)[0][0] + 1
+                mrr += 1.0 / rank
+        mrr /= len(Y[indices[split:]])
+
+        # Store additional metrics in the Optuna trial
+        trial.set_user_attr('macro_f1', macro_f1)
+        trial.set_user_attr('auc', auc)
+        trial.set_user_attr('mrr_10', mrr)
+
         return macro_f1
 
     return objective
@@ -148,13 +175,17 @@ def main():
             all_results[experiment_key] = {
                 'best_params': study.best_params,
                 'best_macro_f1': study.best_value,
+                'best_auc': study.best_trial.user_attrs.get('auc', 0.0),
+                'best_mrr_10': study.best_trial.user_attrs.get('mrr_10', 0.0),
             }
             print(f"Best Hyperparameters for {experiment_key}:", study.best_params)
             print(f"Best Macro-F1 for {experiment_key}:", study.best_value)
+            print(f"Associated AUC for {experiment_key}:", all_results[experiment_key]['best_auc'])
+            print(f"Associated MRR@10 for {experiment_key}:", all_results[experiment_key]['best_mrr_10'])
 
     print("\n=== Summary ===")
     for key, result in all_results.items():
-        print(f"{key}: {result['best_macro_f1']:.4f} | params: {result['best_params']}")
+        print(f"{key}: F1={result['best_macro_f1']:.4f}, AUC={result['best_auc']:.4f}, MRR@10={result['best_mrr_10']:.4f} | params: {result['best_params']}")
 
 
 if __name__ == '__main__':
