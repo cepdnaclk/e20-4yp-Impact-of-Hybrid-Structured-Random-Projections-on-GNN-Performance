@@ -258,13 +258,13 @@ def main():
                 'cpu_time': study.best_trial.user_attrs.get('cpu_time', 0.0),
             }
             print(f"Best Hyperparameters for {experiment_key}:", study.best_params)
-            print(f"Best AUC for {experiment_key}:", study.best_value)
-            print(f"Associated MRR@10 for {experiment_key}:", all_results[experiment_key]['best_mrr_10'])
-            print(f"Embedding CPU Time (s) for {experiment_key}:", all_results[experiment_key]['cpu_time'])
+            print(f"Best AUC for {experiment_key}: {study.best_value * 100:.2f}%")
+            print(f"Associated MRR@10 for {experiment_key}: {all_results[experiment_key]['best_mrr_10'] * 100:.2f}%")
+            print(f"Embedding CPU Time (s) for {experiment_key}: {all_results[experiment_key]['cpu_time']}")
 
     print("\n=== Summary (Link Prediction) ===")
     for key, result in all_results.items():
-        print(f"{key}: AUC={result['best_auc']:.4f}, MRR@10={result['best_mrr_10']:.4f}, Time={result['cpu_time']:.4f}s | params: {result['best_params']}")
+        print(f"{key}: AUC={result['best_auc'] * 100:.2f}%, MRR@10={result['best_mrr_10'] * 100:.2f}%, Time={result['cpu_time']:.4f}s | params: {result['best_params']}")
 
 if __name__ == '__main__':
     main()
