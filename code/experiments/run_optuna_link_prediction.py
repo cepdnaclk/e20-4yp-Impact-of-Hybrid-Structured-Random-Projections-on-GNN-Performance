@@ -67,6 +67,38 @@ def load_data_for(dataset_name: str, data_root: str, device: torch.device):
     print(f"Data preparation complete on {device}")
     return adj, edge_index, feat_tensor
 
+def build_edge_set(edge_index):
+    edge_set = set()
+    for i in range(edge_index.shape[1]):
+        u, v = int(edge_index[0, i]), int(edge_index[1, i])
+        edge_set.add((min(u, v), max(u, v)))
+    return edge_set
+
+def sample_negatives_per_positive(pos_edges, num_nodes, edge_set, k=500):
+    num_pos = pos_edges.shape[1]
+    neg_edges = np.zeros((2, num_pos, k), dtype=np.int64)
+    
+    for i in range(num_pos):
+        assigned_negs = set()
+        while len(assigned_negs) < k:
+            # Batch sample random nodes to speed up
+            u_batch = np.random.randint(0, num_nodes, size=k * 2)
+            v_batch = np.random.randint(0, num_nodes, size=k * 2)
+            for u, v in zip(u_batch, v_batch):
+                if u == v:
+                    continue
+                canonical = (int(min(u, v)), int(max(u, v)))
+                if canonical not in edge_set and canonical not in assigned_negs:
+                    assigned_negs.add(canonical)
+                if len(assigned_negs) == k:
+                    break
+                    
+        assigned_negs_list = list(assigned_negs)
+        neg_edges[0, i, :] = [e[0] for e in assigned_negs_list]
+        neg_edges[1, i, :] = [e[1] for e in assigned_negs_list]
+        
+    return neg_edges
+
 def train_test_split_edges(edge_index, num_nodes, test_ratio=0.1, val_ratio=0.05):
     """
     Split the edges into train/val/test and sample negative edges.
@@ -87,17 +119,14 @@ def train_test_split_edges(edge_index, num_nodes, test_ratio=0.1, val_ratio=0.05
     val_pos_edges = edge_index[:, val_edge_idx]
     train_pos_edges = edge_index[:, train_edge_idx]
     
-    # Sample negative edges for test and val (same number as positive edges)
-    def sample_neg_edges(num_samples):
-        neg_edges = set()
-        while len(neg_edges) < num_samples:
-            i, j = np.random.randint(0, num_nodes, 2)
-            if i != j and i < j:
-                neg_edges.add((i, j))
-        return np.array(list(neg_edges)).T
-
-    test_neg_edges = sample_neg_edges(num_test)
-    val_neg_edges = sample_neg_edges(num_val)
+    # Build complete edge set to avoid sampling true edges
+    edge_set = build_edge_set(edge_index)
+    
+    # Sample 500 negative edges specifically for each test positive edge
+    test_neg_edges = sample_negatives_per_positive(test_pos_edges, num_nodes, edge_set, k=500)
+    
+    # Sample 500 negative edges specifically for each val positive edge
+    val_neg_edges = sample_negatives_per_positive(val_pos_edges, num_nodes, edge_set, k=500)
     
     # Reconstruct the Adjacency matrix for training (using only training edges)
     # FastRP requires an adjacency matrix as input
@@ -115,59 +144,56 @@ def train_test_split_edges(edge_index, num_nodes, test_ratio=0.1, val_ratio=0.05
     shape = torch.Size(train_adj_coo.shape)
     train_adj_tensor = torch.sparse_coo_tensor(indices, values, shape).coalesce()
     
-    return train_adj_tensor, test_pos_edges, test_neg_edges
+    return train_adj_tensor, val_pos_edges, val_neg_edges, test_pos_edges, test_neg_edges
 
 def compute_link_prediction_metrics(embeddings, pos_edges, neg_edges):
     """
     Compute AUC and MRR for link prediction.
+    pos_edges: shape (2, num_pos)
+    neg_edges: shape (2, num_pos, 500)
     """
-    # Dot product similarity for positive edges
+    num_pos = pos_edges.shape[1]
+    
+    # Dot product similarity for positive edges: shape (num_pos,)
     pos_sims = torch.sum(embeddings[pos_edges[0]] * embeddings[pos_edges[1]], dim=1)
     
-    # Dot product similarity for negative edges
-    neg_sims = torch.sum(embeddings[neg_edges[0]] * embeddings[neg_edges[1]], dim=1)
+    # Dot product similarity for negative edges: 
+    #   embeddings[neg_edges[0]] has shape (num_pos, 500, dim)
+    #   embeddings[neg_edges[1]] has shape (num_pos, 500, dim)
+    # We sum over the feature dimension (dim=2) to get dot products for each negative pair
+    neg_u_emb = embeddings[neg_edges[0]]
+    neg_v_emb = embeddings[neg_edges[1]]
+    neg_sims = torch.sum(neg_u_emb * neg_v_emb, dim=2) # shape (num_pos, 500)
     
-    # Labels (1 for positive, 0 for negative)
-    y_true = torch.cat([torch.ones(pos_sims.shape[0]), torch.zeros(neg_sims.shape[0])])
-    y_scores = torch.cat([pos_sims, neg_sims])
+    # --- AUC calculation ---
+    # Flatten everything into single 1D arrays for sklearn AUC
+    pos_sims_flat = pos_sims.cpu().numpy()
+    neg_sims_flat = neg_sims.cpu().numpy().flatten()
     
-    # AUC calculation
-    auc = roc_auc_score(y_true.cpu().numpy(), y_scores.cpu().numpy())
+    y_true = np.concatenate([np.ones(pos_sims_flat.shape[0]), np.zeros(neg_sims_flat.shape[0])])
+    y_scores = np.concatenate([pos_sims_flat, neg_sims_flat])
     
-    # MRR computation (Simplified ranking)
-    # For each positive edge, we rank it against 'num_neg_samples' negative edges.
-    # A standard setting in many papers is ranking 1 positive against 100 negatives, or sometimes against all.
-    # To keep it computationally feasible and standard, let's rank 1 pos vs 99 negs.
-    mrr = 0.0
-    num_pos = pos_sims.shape[0]
-    num_negs = neg_sims.shape[0]
+    auc = roc_auc_score(y_true, y_scores)
     
-    # If we have enough negative samples, we rank each positive against a random subset
-    # This matches common MRR@10 evaluation protocols.
-    ranks = []
-    for i in range(num_pos):
-        # Score of the true edge
-        true_score = pos_sims[i].item()
-        
-        # Sample 99 negative edges for this positive edge
-        # We reuse the generated negative edges
-        neg_idx = torch.randint(0, num_negs, (99,))
-        sampled_neg_scores = neg_sims[neg_idx]
-        
-        # Combine true score and neg scores
-        all_scores = torch.cat([torch.tensor([true_score]), sampled_neg_scores])
-        
-        # Sort scores in descending order
-        sorted_indices = torch.argsort(all_scores, descending=True)
-        
-        # Find the rank of the true edge (index 0 in all_scores)
-        rank = (sorted_indices == 0).nonzero(as_tuple=True)[0].item() + 1
-        
-        # We compute MRR@10. If rank > 10, reciprocal rank is 0.
-        if rank <= 10:
-            mrr += 1.0 / rank
-            
-    mrr /= num_pos
+    # --- MRR@10 computation ---
+    # Expand pos_sims to shape (num_pos, 1) and concatenate with neg_sims (num_pos, 500)
+    # to form an all_scores matrix of shape (num_pos, 501), where index 0 is the true edge's score.
+    pos_sims_exp = pos_sims.unsqueeze(1)
+    all_scores = torch.cat([pos_sims_exp, neg_sims], dim=1) # shape (num_pos, 501)
+    
+    # Sort descending along each row (dim=1)
+    sorted_indices = torch.argsort(all_scores, dim=1, descending=True)
+    
+    # Find the rank of the true edge (index 0). We can do this efficiently without a loop.
+    # sorted_indices == 0 gives a boolean matrix, nonzero gives the true edge's position.
+    ranks_0_indexed = (sorted_indices == 0).nonzero(as_tuple=True)[1]
+    ranks = ranks_0_indexed + 1 # Convert from 0-indexed to 1-indexed
+    
+    # Only points ranked in top 10 contribute to MRR@10, others count as 0
+    mask = ranks <= 10
+    
+    # Sum the inverted ranks of valid entries and divide by total number of positive edges
+    mrr = (1.0 / ranks[mask].float()).sum().item() / num_pos
     
     return auc, mrr
 
@@ -232,11 +258,11 @@ def main():
         # We need to hide test edges from the FastRP embedding generation
         np.random.seed(42)
         torch.manual_seed(42)
-        train_adj_tensor, test_pos_edges, test_neg_edges = train_test_split_edges(edge_index, num_nodes)
+        train_adj_tensor, val_pos_edges, val_neg_edges, test_pos_edges, test_neg_edges = train_test_split_edges(edge_index, num_nodes)
         
         print(f"   Train Edges (undirected pairs): {train_adj_tensor._nnz() // 2}")
         print(f"   Test Pos Edges: {test_pos_edges.shape[1]}")
-        print(f"   Test Neg Edges: {test_neg_edges.shape[1]}")
+        print(f"   Test Neg Edges (per positive): {test_neg_edges.shape[2]}")
 
         for variant in variants:
             if variant == 'hybrid' and feat_tensor is None:
