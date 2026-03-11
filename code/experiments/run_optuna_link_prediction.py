@@ -210,13 +210,17 @@ def compute_link_prediction_metrics(embeddings, pos_edges, neg_edges):
     
     return auc, mrr
 
-def make_objective(train_adj_tensor, feat_tensor, test_pos_edges, test_neg_edges, device: torch.device, variant: str):
+def make_objective(train_adj_tensor, feat_tensor, val_pos_edges, val_neg_edges, device: torch.device, variant: str):
     def objective(trial):
         # 1. Suggest Hyperparameters
         _dim = trial.suggest_categorical('dim', [64, 128, 256, 512])
         _window_size = trial.suggest_int('window_size', 1, 5)
         _normalization = trial.suggest_categorical('normalization', [True, False])
         _g = trial.suggest_int('g', 2, 10)
+
+        # Parse variant
+        proj_type = 'striped' if 'striped' in variant else 'gaussian'
+        use_features = feat_tensor if 'hybrid' in variant else None
 
         # 2. Initialize Model
         model = FastRP(
@@ -227,30 +231,70 @@ def make_objective(train_adj_tensor, feat_tensor, test_pos_edges, test_neg_edges
             input_matrix='trans',
             alpha=-0.6,
             weights=[1.0, 1.0, 7.81, 45.28],
-            projection_type='gaussian',
+            projection_type=proj_type,
         ).to(device)
 
         # 3. Generate Embeddings
         start_time = time.process_time()
         with torch.no_grad():
-            if variant == 'hybrid':
-                embeddings = model(train_adj_tensor.to(device), features=feat_tensor)
-            else:
-                embeddings = model(train_adj_tensor.to(device), features=None)
+            embeddings = model(train_adj_tensor.to(device), features=use_features)
         cpu_time = time.process_time() - start_time
 
         # 4. Evaluate (Link Prediction)
-        auc, mrr = compute_link_prediction_metrics(embeddings.cpu(), test_pos_edges, test_neg_edges)
+        auc, mrr = compute_link_prediction_metrics(embeddings.cpu(), val_pos_edges, val_neg_edges)
 
-        # Optuna optimizes a single value. Usually AUC is robust for link prediction.
         trial.set_user_attr('auc', auc)
         trial.set_user_attr('mrr_10', mrr)
         trial.set_user_attr('cpu_time', cpu_time)
 
-        # Return AUC as the metric to maximize
-        return auc
+        # Return MRR@10 as the metric to maximize during validation
+        return mrr
 
     return objective
+
+def evaluate_best_model(study, train_adj_tensor, feat_tensor, test_pos_edges, test_neg_edges, device, variant, num_seeds=5):
+    best_params = study.best_params
+    proj_type = 'striped' if 'striped' in variant else 'gaussian'
+    use_features = feat_tensor if 'hybrid' in variant else None
+
+    test_aucs = []
+    test_mrrs = []
+    test_times = []
+
+    seeds = [42, 100, 200, 300, 400]
+    for seed in seeds[:num_seeds]:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+        model = FastRP(
+            embedding_dim=best_params['dim'],
+            window_size=best_params['window_size'],
+            normalization=best_params['normalization'],
+            group_size=best_params['g'],
+            input_matrix='trans',
+            alpha=-0.6,
+            weights=[1.0, 1.0, 7.81, 45.28],
+            projection_type=proj_type,
+        ).to(device)
+
+        start_time = time.process_time()
+        with torch.no_grad():
+            embeddings = model(train_adj_tensor.to(device), features=use_features)
+        cpu_time = time.process_time() - start_time
+
+        auc, mrr = compute_link_prediction_metrics(embeddings.cpu(), test_pos_edges, test_neg_edges)
+        test_aucs.append(auc)
+        test_mrrs.append(mrr)
+        test_times.append(cpu_time)
+
+    return {
+        'auc_mean': np.mean(test_aucs),
+        'auc_std': np.std(test_aucs),
+        'mrr_mean': np.mean(test_mrrs),
+        'mrr_std': np.std(test_mrrs),
+        'time_mean': np.mean(test_times),
+        'time_std': np.std(test_times)
+    }
 
 def main():
     dataset_names = ['cora', 'citeseer', 'pubmed']
@@ -260,50 +304,57 @@ def main():
     print(f"Running on: {device}")
 
     all_results = {}
-    variants = ['gaussian', 'hybrid']
+    variants = ['gaussian', 'striped', 'hybrid_gaussian', 'hybrid_striped']
 
     for dataset_name in dataset_names:
         # Load the graph
         adj, edge_index, feat_tensor = load_data_for(dataset_name, data_root, device)
         num_nodes = adj.shape[0]
 
-        # Prepare the train/test split for Link Prediction
-        # We need to hide test edges from the FastRP embedding generation
+        # Prepare the train/val/test split for Link Prediction
         np.random.seed(42)
         torch.manual_seed(42)
-        train_adj_tensor, val_pos_edges, val_neg_edges, test_pos_edges, test_neg_edges = train_test_split_edges(edge_index, num_nodes)
+        train_adj_tensor, val_pos_edges, val_neg_edges, test_pos_edges, test_neg_edges = train_test_split_edges(edge_index, num_nodes, test_ratio=0.1, val_ratio=0.05)
         
         print(f"   Train Edges (undirected pairs): {train_adj_tensor._nnz() // 2}")
+        print(f"   Val Pos Edges: {val_pos_edges.shape[1]}")
         print(f"   Test Pos Edges: {test_pos_edges.shape[1]}")
-        print(f"   Test Neg Edges (per positive): {test_neg_edges.shape[2]}")
 
         for variant in variants:
-            if variant == 'hybrid' and feat_tensor is None:
-                print(f"Skipping hybrid variant for {dataset_name} due to lack of features.")
+            if 'hybrid' in variant and feat_tensor is None:
+                print(f"Skipping {variant} for {dataset_name} due to lack of features.")
                 continue
 
             experiment_key = f"{dataset_name} ({variant})"
             print(f"\n=== Optuna: {experiment_key} ===")
             study = optuna.create_study(direction='maximize')
-            objective = make_objective(train_adj_tensor, feat_tensor, test_pos_edges, test_neg_edges, device, variant)
+            objective = make_objective(train_adj_tensor, feat_tensor, val_pos_edges, val_neg_edges, device, variant)
             
             # n_trials can be adjusted. Set to 10 for faster testing, but 50 aligns with your Node Classification.
             study.optimize(objective, n_trials=50, show_progress_bar=True)
 
+            print(f"Best Val Params for {experiment_key}:", study.best_params)
+            print(f"Best Val MRR@10 for {experiment_key}: {study.best_value * 100:.2f}%")
+
+            # Final Evaluation on Test Set across multiple seeds
+            test_results = evaluate_best_model(study, train_adj_tensor, feat_tensor, test_pos_edges, test_neg_edges, device, variant, num_seeds=5)
+
             all_results[experiment_key] = {
                 'best_params': study.best_params,
-                'best_auc': study.best_value,
-                'best_mrr_10': study.best_trial.user_attrs.get('mrr_10', 0.0),
-                'cpu_time': study.best_trial.user_attrs.get('cpu_time', 0.0),
+                'val_mrr': study.best_value,
+                'test_auc_mean': test_results['auc_mean'],
+                'test_auc_std': test_results['auc_std'],
+                'test_mrr_mean': test_results['mrr_mean'],
+                'test_mrr_std': test_results['mrr_std'],
+                'test_time_mean': test_results['time_mean'],
+                'test_time_std': test_results['time_std'],
             }
-            print(f"Best Hyperparameters for {experiment_key}:", study.best_params)
-            print(f"Best AUC for {experiment_key}: {study.best_value * 100:.2f}%")
-            print(f"Associated MRR@10 for {experiment_key}: {all_results[experiment_key]['best_mrr_10'] * 100:.2f}%")
-            print(f"Embedding CPU Time (s) for {experiment_key}: {all_results[experiment_key]['cpu_time']}")
+            print(f"Test AUC for {experiment_key}: {test_results['auc_mean']*100:.2f} ± {test_results['auc_std']*100:.2f}%")
+            print(f"Test MRR@10 for {experiment_key}: {test_results['mrr_mean']*100:.2f} ± {test_results['mrr_std']*100:.2f}%")
 
-    print("\n=== Summary (Link Prediction) ===")
+    print("\n=== Summary (Link Prediction Final Test Results) ===")
     for key, result in all_results.items():
-        print(f"{key}: AUC={result['best_auc'] * 100:.2f}%, MRR@10={result['best_mrr_10'] * 100:.2f}%, Time={result['cpu_time']:.4f}s | params: {result['best_params']}")
+        print(f"{key}: AUC={result['test_auc_mean']*100:.2f}±{result['test_auc_std']*100:.2f}%, MRR={result['test_mrr_mean']*100:.2f}±{result['test_mrr_std']*100:.2f}%, Time={result['test_time_mean']:.4f}±{result['test_time_std']:.4f}s | params: {result['best_params']}")
 
 if __name__ == '__main__':
     main()
