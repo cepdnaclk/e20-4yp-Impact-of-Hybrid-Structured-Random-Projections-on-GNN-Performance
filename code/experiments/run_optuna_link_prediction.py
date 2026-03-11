@@ -154,16 +154,29 @@ def compute_link_prediction_metrics(embeddings, pos_edges, neg_edges):
     """
     num_pos = pos_edges.shape[1]
     
-    # Dot product similarity for positive edges: shape (num_pos,)
-    pos_sims = torch.sum(embeddings[pos_edges[0]] * embeddings[pos_edges[1]], dim=1)
+    # Process in batches to prevent Out-Of-Memory / slow thrashing 
+    # especially for large graphs like pubmed where (num_pos, 500, dim) is huge.
+    batch_size = 500
+    pos_sims_list = []
+    neg_sims_list = []
     
-    # Dot product similarity for negative edges: 
-    #   embeddings[neg_edges[0]] has shape (num_pos, 500, dim)
-    #   embeddings[neg_edges[1]] has shape (num_pos, 500, dim)
-    # We sum over the feature dimension (dim=2) to get dot products for each negative pair
-    neg_u_emb = embeddings[neg_edges[0]]
-    neg_v_emb = embeddings[neg_edges[1]]
-    neg_sims = torch.sum(neg_u_emb * neg_v_emb, dim=2) # shape (num_pos, 500)
+    for i in range(0, num_pos, batch_size):
+        end = min(i + batch_size, num_pos)
+        
+        # Positive batch
+        p_u = embeddings[pos_edges[0, i:end]]
+        p_v = embeddings[pos_edges[1, i:end]]
+        batch_pos_sims = torch.sum(p_u * p_v, dim=1)
+        pos_sims_list.append(batch_pos_sims)
+        
+        # Negative batch
+        n_u = embeddings[neg_edges[0, i:end]] # shape (batch_size, 500, dim)
+        n_v = embeddings[neg_edges[1, i:end]] # shape (batch_size, 500, dim)
+        batch_neg_sims = torch.sum(n_u * n_v, dim=2) # shape (batch_size, 500)
+        neg_sims_list.append(batch_neg_sims)
+        
+    pos_sims = torch.cat(pos_sims_list, dim=0)
+    neg_sims = torch.cat(neg_sims_list, dim=0)
     
     # --- AUC calculation ---
     # Flatten everything into single 1D arrays for sklearn AUC
