@@ -1,36 +1,25 @@
 {
     "team": [
         {
-            "name": "Team Member Name 1",
-            "email": "email@eng.pdn.ac.lk",
-            "eNumber": "E/yy/xxx"
+            "name": "Haththella H.A.D.T.N.",
+            "email": "e20133@eng.pdn.ac.lk",
+            "eNumber": "E/20/133"
         },
         {
-            "name": "Team Member Name 2",
-            "email": "email@eng.pdn.ac.lk",
-            "eNumber": "E/yy/xxx"
+            "name": "Premasiri L.R.S.R.",
+            "email": "e20305@eng.pdn.ac.lk",
+            "eNumber": "E/20/305"
         },
         {
-            "name": "Team Member Name 3",
-            "email": "email@eng.pdn.ac.lk",
-            "eNumber": "E/yy/xxx"
+            "name": "Somathilaka A.N.T.",
+            "email": "e20381@eng.pdn.ac.lk",
+            "eNumber": "E/20/381"
         }
     ],
     "supervisors": [
         {
-            "name": "Dr. Supervisor 1",
-            "email": "email@eng.pdn.ac.lk"
-        },
-        {
-            "name": "Dr. Supervisor 2",
-            "email": "email@eng.pdn.ac.lk"
-        }
-    ],
-    "media": [
-        {
-            "type": "youtube",
-            "title": "",
-            "url": "#"
+            "name": "Dr. Eng. Sampath Deegalla",
+            "email": "sampath@eng.pdn.ac.lk"
         }
     ],
     "tags": ["Final Year Projects"]
