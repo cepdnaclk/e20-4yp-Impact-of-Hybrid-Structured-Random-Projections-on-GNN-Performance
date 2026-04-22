@@ -1,0 +1,20 @@
+{
+  "study_name": "fastrp_ogbn_arxiv_hybrid_tuning",
+  "storage": "sqlite:////scratch1/e20-fyp-hyb-rand-proj/fyp/code/experiments/optuna_ogbn_arxiv.db",
+  "n_trials_total": 150,
+  "best_trial_number": 111,
+  "best_params": {
+    "embedding_dim": 512,
+    "window_size": 6,
+    "normalization": true,
+    "group_size": 9,
+    "alpha": -0.38964847051103335,
+    "logreg_C": 0.09961587292216915,
+    "logreg_max_iter": 2000
+  },
+  "metrics": {
+    "train_acc": 0.7472976985078238,
+    "valid_acc": 0.7037820061075875,
+    "test_acc": 0.6904717815772689
+  }
+}
