@@ -1,0 +1,575 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\title{Fast and Accurate Network Embeddings via Very Sparse Random Projection}
+\author{
+Haochen Chen\\
+\texttt{haocchen@cs.stonybrook.edu}\\
+Stony Brook University
+\and
+Syed Fahad Sultan\\
+\texttt{ssyedfahad@cs.stonybrook.edu}\\
+Stony Brook University
+\and
+Yingtao Tian\\
+\texttt{yittian@cs.stonybrook.edu}\\
+Stony Brook University
+\and
+Muhao Chen\\
+\texttt{muhaochen@ucla.edu}\\
+University of California, Los Angeles
+\and
+Steven Skiena\\
+\texttt{skiena@cs.stonybrook.edu}\\
+Stony Brook University
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present FastRP, a scalable and performant algorithm for learning distributed node representations in a graph. FastRP is over 4,000 times faster than state-of-the-art methods such as DeepWalk and node2vec, while achieving comparable or even better performance as evaluated on several real-world networks on various downstream tasks. We observe that most network embedding methods consist of two components: construct a node similarity matrix and then apply dimension reduction techniques to this matrix. We show that the success of these methods should be attributed to the proper construction of this similarity matrix, rather than the dimension reduction method employed.
+
+FastRP is proposed as a scalable algorithm for network embeddings. Two key features of FastRP are: (1) it explicitly constructs a node similarity matrix that captures transitive relationships in a graph and normalizes matrix entries based on node degrees; (2) it utilizes very sparse random projection, which is a scalable optimization-free method for dimension reduction. An extra benefit from combining these two design choices is that it allows the iterative computation of node embeddings so that the similarity matrix need not be explicitly constructed, which further speeds up FastRP. FastRP is also advantageous for its ease of implementation, parallelization and hyperparameter tuning. The source code is available at \url{https://github.com/GTmac/FastRP}.
+\end{abstract}
+
+\section{Introduction}
+
+Network embedding methods learn low-dimensional distributed representation of nodes in a network. These learned representations can serve as latent features for a variety of inference tasks on graphs, such as node classification [23], link prediction [16] and network reconstruction [36].
+
+Research on network embeddings dates back to early 2000s in the context of dimension reduction, when methods such as LLE [27], IsoMap [32] and Laplacian Eigenmaps [4] were proposed. These methods are general in that they embed an arbitrary $n \times m$ feature matrix (where $n$ is the number of data points) into an $n \times d$ embedding matrix, where $d \ll m$. Although these methods produce high-quality embeddings, their time complexity is at least $O(n^2)$, which is prohibitive for large $n$.
+
+More recent work in this area shifts focus to embedding graph data, which represents a special class of sparse feature matrix, where $n=m$. The sparsity and discreteness of real-world graphs permit the design of more scalable network embedding algorithms. The pioneering work here is DeepWalk [23], which essentially samples node pairs from $k$-step transition matrices with different values of $k$, and then trains a Skip-gram [22] model on these pairs to obtain node embeddings.
+
+The most significant contribution of DeepWalk is that it introduces a two-component paradigm for representation learning on graphs: first explicitly constructing a node similarity matrix or implicitly sampling node pairs from it, then performing dimension reduction on the matrix to produce node embeddings. Much subsequent work has since followed to propose different strategies for both steps [16, 30, 33, 36].
+
+Although most such methods are considered scalable with time complexity being linear in the number of nodes and/or edges, the constant factor is often too large to ignore. The reason is two-fold. First, many of these methods are sampling-based and a huge number of samples is required to learn high-quality embeddings. For example, DeepWalk samples about 32,000 context nodes per node under its default setting. Second, the dimension reduction methods being used also incur substantial computational cost, making this constant factor even larger. Popular methods such as DeepWalk [23], LINE [30] and node2vec [16] all adopt Skip-gram for learning node embeddings. However, optimizing the Skip-gram model is time-consuming due to the large number of gradient updates needed before the model converges. As such, despite being the most scalable state-of-the-art network embedding algorithms, it still takes DeepWalk and LINE several days of CPU time to embed the Youtube graph [31], a moderately sized graph with 1M nodes and 3M edges.
+
+Can we design a truly scalable network embedding method that produces node embeddings for million-scale graphs in several minutes without compromising the representation quality? To answer this question, the authors analyze several state-of-the-art network embedding methods by examining their design choices for both similarity matrix construction and dimension reduction. This analysis motivates FastRP, which presents much more scalable solutions to both steps without compromising embedding quality.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{fig1.png}
+    \caption{Visualization of the embeddings produced by FastRP, DeepWalk and RandNE on the WWW network for websites from five country code top-level domains. We use t-SNE to project the embeddings to two-dimensional space.}
+    \label{fig:fig1}
+\end{figure}
+
+To illustrate the effectiveness of FastRP, the paper visualizes the node representations produced by FastRP, DeepWalk [23] and an earlier random-projection-based method, RandNE [38] on the WWW network (Figure~\ref{fig:fig1}). The nodes are hostnames such as \texttt{youtube.com} and \texttt{instagram.com}. For the purpose of visualization, t-SNE [21] is used to project the node embeddings to two-dimensional space. The websites are taken from five countries: United Kingdom (.uk), Japan (.jp), Brazil (.br), France (.fr) and Spain (.es), as indicated by the color of the dots. For FastRP and DeepWalk, the websites from each top-level domain form clusters that are very well separated. For the RandNE embeddings, there is no clear boundary between the websites from different top-level domains. FastRP achieves similar quality to DeepWalk while being over 4,000 times faster.
+
+The main contributions are the following:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Improved understanding of existing network embedding algorithms.} By viewing representative network embedding algorithms as a procedure with two components, similarity matrix construction and dimension reduction, the paper provides improved understanding of why these algorithms work and why they have scalability issues.
+    \item \textbf{Better formulation of the node similarity matrix.} FastRP constructs a node similarity matrix with two unique properties: it considers the implicit, transitive relationships between nodes, and it normalizes pairwise similarity of nodes based on node degrees.
+    \item \textbf{More scalable dimension reduction algorithm.} Different from previous work that relies on time-consuming dimension reduction methods such as Skip-gram and SVD, FastRP obtains node embeddings via very sparse random projection of the node similarity matrix. An additional benefit from combining these two design choices is that it allows iterative computation of node embeddings with linear cost in the size of the graph.
+    \item \textbf{DeepWalk-quality embeddings produced over 4,000 times faster.} Extensive experimental results show that FastRP produces high-quality node embeddings comparable to state-of-the-art methods while being at least three orders of magnitude faster.
+\end{itemize}
+
+\section{Preliminaries}
+
+In this section, the paper gives the formal definition of network embeddings and introduces the paradigm of network embeddings as a two-component process. It then details the design decisions of several state-of-the-art methods for both components and shows why they have scalability issues.
+
+\subsection{Notation and Task Definition}
+
+We consider the problem of embedding a network: given an undirected graph, the goal is to learn a low-dimensional latent representation for each node in the graph. Formally, let $G=(V,E)$ be a graph, where $V$ is the set of nodes and $E$ is the set of edges. Let $n=|V|$ be the number of nodes, $m=|E|$ be the number of edges, $d_i$ be the degree of the $i$-th node, and $S$ be the adjacency matrix of $G$. The goal of network embeddings is to develop a mapping
+\[
+\Phi: V \mapsto N \in \mathbb{R}^{n \times d}, \qquad d \ll n.
+\]
+For a node $v \in V$, the $d$-dimensional vector $N_v$ is its embedding vector (or node embedding).
+
+Network embeddings can be viewed as performing dimension reduction on graphs: the input is an $n \times n$ feature matrix associated with the graph, on which dimension reduction techniques are applied to reduce its dimensionality to $n \times d$. This leads to two questions:
+\begin{enumerate}[leftmargin=1.5em]
+    \item What is an appropriate node similarity matrix to perform dimension reduction on?
+    \item What dimension reduction techniques should be used?
+\end{enumerate}
+
+\subsection{Node Similarity Matrix}
+
+The most straightforward input matrices to consider are the adjacency matrix $S$ or the transition matrix $A$:
+\begin{equation}
+A = D^{-1}S,
+\end{equation}
+where $D$ is the degree matrix of $G$:
+\[
+D_{ij} =
+\begin{cases}
+\sum_p S_{ip}, & \text{if } i=j, \\
+0, & \text{otherwise.}
+\end{cases}
+\]
+
+However, directly applying dimension reduction techniques on $S$ or $A$ is problematic. Real-world graphs are usually extremely sparse, which means most of the entries in $S$ are zero. However, the absence of an edge between two nodes $u$ and $v$ does not imply that there is no association between them. In particular, if two nodes are not adjacent but are connected by a large number of paths, it is still likely that there is a strong association between them.
+
+The intuition above motivates the exploitation of higher-order relationships in the graph. A natural high-order node similarity matrix is the $k$-step transition matrix:
+\begin{equation}
+A^k = \underbrace{A \cdot \ldots \cdot A}_{k}.
+\end{equation}
+The $(i,j)$-th entry of $A^k$ denotes the probability of reaching $j$ from $i$ in exactly $k$ steps of random walk.
+
+\subsection{Dimension Reduction Techniques}
+
+Once an $n \times n$ similarity matrix is constructed, network embedding methods perform dimension reduction on it to obtain node representations. Two commonly used dimension reduction techniques are singular value decomposition (SVD) and Skip-gram.
+
+\paragraph{SVD.}
+SVD [17] is a classical matrix factorization method for dimension reduction. SVD factorizes a feature matrix $M$ into the product of three matrices,
+\[
+M = U \Sigma V^\top,
+\]
+where $U$ and $V$ are orthonormal and $\Sigma$ is a diagonal matrix consisting of singular values. To perform dimension reduction with SVD, it is common to take the top $d$ singular values $\Sigma_d$ from $\Sigma$ and the corresponding columns from $U$ and $V$.
+
+\paragraph{Skip-gram.}
+Skip-gram [22] is a method for learning word embeddings, which is also shown to be performant in the context of network embeddings. Skip-gram works by sampling word pairs (or node pairs) from a word co-occurrence matrix (or node similarity matrix) $C$ and modeling the probability that a given word-context pair $(u,v)$ is from $C$ or not. Goldberg and Levy [19] showed that Skip-gram is implicitly factorizing a shifted pointwise mutual information (PMI) matrix of word co-occurrences. Formally, the matrix Skip-gram seeks to factorize has elements:
+\begin{equation}
+M_{uv} = \log \frac{\#(u,v) \cdot |C|}{\#(u) \cdot \#(v)} - \log b = \log(\operatorname{PMI}(u,v)) - \log b,
+\end{equation}
+where $\#(u)$ denotes the occurrence count of $u$ in $C$ and $b$ denotes the number of negative samples in Skip-gram.
+
+\subsection{Representative Network Embedding Methods}
+
+This section discusses how three representative network embedding methods---DeepWalk [23], LINE [30] and GraRep [7]---fit into the two-component procedure described above. The analysis of node2vec [16] is similar to that of DeepWalk and is omitted in the original paper.
+
+\paragraph{DeepWalk [23].}
+DeepWalk's core idea is to sample node pairs from a weighted combination of $A, A^2, \ldots, A^k$, and then train a Skip-gram model on these samples. Making use of the previous equation, it can be shown that DeepWalk is implicitly factorizing the following matrix [26]:
+\begin{equation}
+M = \log\left(\operatorname{vol}(G)\left(\frac{1}{k}\sum_{r=1}^{k} A^r D^{-1}\right)\right) - \log b,
+\end{equation}
+where $\operatorname{vol}(G)=\sum_i \sum_j S_{ij}$.
+
+\paragraph{LINE [30].}
+LINE can be seen as a variation of DeepWalk that only considers node pairs that are at most two hops away. Using a similar derivation, it can be shown that LINE implicitly factorizes:
+\begin{equation}
+M = \log\bigl(\operatorname{vol}(G)(AD^{-1})\bigr) - \log b.
+\end{equation}
+
+\paragraph{GraRep [7].}
+GraRep can be regarded as the matrix factorization version of DeepWalk. Instead of sampling from $A, A^2, \ldots, A^k$, it directly computes these matrices and then factorizes the corresponding shifted PMI matrix for each power of $A$.
+
+\subsection{Scalability of Representative Methods}
+
+Putting existing methods into this two-component framework reveals their intrinsic scalability issues.
+
+\paragraph{Node similarity matrix construction.}
+Many previous studies have demonstrated the importance of preserving high-order proximity between nodes [7, 23, 26, 38, 39], which is typically done by raising $A$ to the $k$-th power and optionally normalizing it afterward. This causes scalability issues since both computing $A^k$ and applying a transformation to each element in $A^k$ are at least quadratic. For methods such as DeepWalk and node2vec, this problem is slightly mitigated by sampling node pairs from $A^k$ instead. But still, a huge number of samples is required for them to get an accurate enough estimation of $A^k$.
+
+\paragraph{Dimension reduction.}
+The dimension reduction techniques adopted by these methods also affect their scalability. Both Skip-gram and SVD are not among the fastest dimension reduction algorithms [35].
+
+\section{Method}
+
+This section introduces FastRP. It first describes the usage of very sparse random projection for dimension reduction and its merit in preserving high-order proximity. Then, it presents the design of the node similarity matrix. This matrix is carefully designed so that: (1) it preserves transitive relationships in the input graph; (2) its entries are properly normalized; and (3) it can be formulated as matrix-chain multiplication, so that applying random projection on this matrix only costs linear time.
+
+\subsection{Very Sparse Random Projection}
+
+Random projection is a dimension reduction method that preserves pairwise distances between data points with strong theoretical guarantees [35]. To reduce an $n \times m$ feature matrix $M$ to an $n \times d$ matrix $N$ where $d \ll m$, we can simply multiply the feature matrix with an $m \times d$ random projection matrix $R$:
+\begin{equation}
+N = M \cdot R.
+\end{equation}
+As long as the entries of $R$ are i.i.d. with zero mean, $N$ is able to preserve the pairwise distances in $AA^\top$ [2].
+
+The most studied random projection variant is Gaussian random projection, where entries of $R$ are sampled i.i.d. from a Gaussian distribution, $R_{ij} \sim \mathcal{N}(0,1/d)$. Since $R$ is a dense $m \times d$ matrix, the time complexity of Gaussian random projection is $O(nmd)$.
+
+As an improvement to Gaussian random projection, Achlioptas [1] proposed sparse random projection, where entries of $R$ are sampled i.i.d. from
+\begin{equation}
+R_{ij} =
+\begin{cases}
+\sqrt{s}, & \text{with probability } \frac{1}{2s}, \\
+0, & \text{with probability } 1 - \frac{1}{s}, \\
+-\sqrt{s}, & \text{with probability } \frac{1}{2s}.
+\end{cases}
+\end{equation}
+When $s=3$, this leads to a $3\times$ speedup since $2/3$ of the entries of $R$ are zero. Additionally, this configuration of $R$ does not require floating-point computation since the multiplication with $\sqrt{s}$ can be delayed, providing additional speedup.
+
+Li et al. [20] extend Achlioptas [1] by showing that $s \gg 3$ can be used to further speed up the computation. They recommend setting $s=\sqrt{m}$, which achieves $\sqrt{m}$ times speedup over Gaussian random projection while ensuring embedding quality. In this work, the very sparse random projection method is used for dimension reduction of the node similarity matrix.
+
+As an optimization-free dimension reduction method, very sparse random projection wins over SVD and Skip-gram for its superior computational efficiency. The fact that it only requires matrix multiplication also enables faster computation on accelerators such as GPUs, as well as easy parallelization.
+
+Apart from these advantages, the random projection approach also benefits from the associative property of matrix multiplication. To see why this is important, consider the basic form of high-order similarity matrix $A^k$, as defined earlier. To compute its random projection $N=A^kR$, there is no need to calculate $A^k$ from scratch since the computation can be done iteratively:
+\begin{equation}
+N = A\bigl(\cdots A(A R)\cdots\bigr).
+\end{equation}
+This reduces the time complexity from $O(n^3kd)$ to $O(mkd)$.
+
+\subsection{Similarity Matrix Construction}
+
+The next step is to construct a proper node similarity matrix leveraging the associative property of matrix multiplication. The paper makes two key observations about the similarity matrices used by existing methods. First, it is important to preserve high-order proximity in the input graph---this is typically done by raising $A$ to the $k$-th power. Second, element-wise normalization is performed (taking logarithm for DeepWalk, LINE and GraRep) on the raw similarity matrix before dimension reduction.
+
+Most previous matrix-based network embedding methods emphasize the importance of high-order proximity but skip the element-wise normalization step for either better scalability or ease of analysis [25, 26, 38]. Is normalization of the node similarity matrix important? If so, is there any other normalization method that allows for scalable computation? These questions are answered by analyzing the properties of $A^k$ from a spectral graph theory perspective.
+
+To begin with, consider a transformation of $A$ defined as
+\[
+B = D^{1/2} A D^{-1/2}.
+\]
+Since $B$ is a real symmetric matrix, it can be decomposed as $B=Q\Lambda Q^\top$, where $\Lambda$ is a diagonal matrix of eigenvalues $\lambda_1 \ge \lambda_2 \ge \cdots \ge \lambda_n$ of $B$, and $Q$ is an orthogonal matrix consisting of the corresponding eigenvectors $q_1,\ldots,q_n$.
+
+It is easy to verify that
+\[
+\left(1,\, w = (\sqrt{d_1},\ldots,\sqrt{d_n})\right)
+\]
+is an eigenpair of $B$. Following the Frobenius--Perron theorem [15], we have
+\[
+\lambda_1 = 1 > \lambda_2 \ge \cdots \ge \lambda_n \ge -1,
+\]
+and
+\[
+q_1 = \left(\sqrt{\frac{d_1}{2m}},\ldots,\sqrt{\frac{d_n}{2m}}\right).
+\]
+Now:
+\begin{align}
+A^k &= D^{-1/2} B^k D^{1/2} = D^{-1/2}(Q\Lambda Q^\top)^k D^{1/2} \\
+&= D^{-1/2} Q\Lambda^k Q^\top D^{1/2} \\
+&= \sum_{t=1}^{n} \lambda_t^k D^{-1/2} q_t q_t^\top D^{1/2} \\
+&= P + \sum_{t=2}^{n} \lambda_t^k D^{-1/2} q_t q_t^\top D^{1/2},
+\end{align}
+where $P_{ij} = d_j/(2m)$.
+
+For a particular entry $A^k_{ij}$ we have:
+\begin{equation}
+A^k_{ij} = \frac{d_j}{2m} + \sum_{t=2}^{n} \lambda_t^k q_{ti} q_{tj} \sqrt{\frac{d_j}{d_i}}.
+\end{equation}
+
+This derivation illustrates the importance of normalization. Since $|\lambda_t|<1$ holds for $t=2,\ldots,n$ (assuming $G$ is non-bipartite), we have $A^k_{ij} \to d_j/(2m)$ when $k \to \infty$. Since many real-world graphs are scale-free [3], it follows that the entries in $A^k$ also have a heavy-tailed distribution.
+
+The heavy-tailed distribution of data causes problems for dimension reduction methods [20]. The pairwise distances between data points are dominated by columns with exceptionally large values, rendering them less meaningful. In practice, term-weighting schemes are applied to heavy-tailed data to reduce kurtosis and skewness [28]. Here, the authors consider a scaled version of the Tukey transformation [34]. Concretely, a feature $y$ is transformed into $y^{\lambda}$, where $\lambda$ controls the strength of normalization. Since the exact feature values in $A^k$ are not known and should not be calculated for scalability reasons, the fact that $A^k_{ij}$ converges to $d_j/(2m)$ is used instead. The normalization considered is therefore:
+\begin{equation}
+\widetilde{A}^k_{ij} = A^k_{ij}\left(\frac{d_j}{2m}\right)^{\lambda-1}
+\approx A^k_{ij}\left(A^k_{ij}\right)^{\lambda-1}
+\approx \left(A^k_{ij}\right)^{\lambda}.
+\end{equation}
+
+\subsection{Our Algorithm: FastRP}
+
+Let $\beta = \lambda -1$. The normalization scheme above can be represented in matrix form as
+\[
+\widetilde{A}^k = A^k L,
+\]
+where
+\[
+L = \operatorname{diag}\left(\left(\frac{d_1}{2m}\right)^{\beta},\ldots,\left(\frac{d_n}{2m}\right)^{\beta}\right).
+\]
+This allows matrix-chain multiplication when performing random projection:
+\[
+N = \widetilde{A}^k R = A\bigl(\cdots A(A L R)\cdots\bigr).
+\]
+
+The paper further considers a weighted combination of different powers of $A$, so that the embeddings of $G$ are computed as follows:
+\[
+N = \left(\alpha_1 \widetilde{A} + \alpha_2 \widetilde{A}^2 + \cdots + \alpha_k \widetilde{A}^k\right)R,
+\]
+where $\alpha_1,\alpha_2,\ldots,\alpha_k$ are the weights.
+
+\begin{algorithm}[H]
+\caption{FastRP($A$)}
+\begin{algorithmic}[1]
+\Require Graph transition matrix $A$, embedding dimensionality $d$, maximum power $k$, normalization strength $\beta$, weights $\alpha_1,\alpha_2,\ldots,\alpha_k$
+\Ensure Matrix of node representations $N \in \mathbb{R}^{n \times d}$
+\State Produce $R \in \mathbb{R}^{n \times d}$ according to Eq.~(6)
+\State $N_1 \gets A \cdot L \cdot R$, where $L_{ij} = \left(\frac{d_j}{2m}\right)^{\beta}$
+\For{$i = 2$ to $k$}
+    \State $N_i \gets A \cdot N_{i-1}$
+\EndFor
+\State $N \gets \alpha_1 N_1 + \cdots + \alpha_k N_k$
+\State \Return $N$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Time Complexity}
+
+The time complexity of FastRP is $O((n\cdot d)/s)=O(n\sqrt{d})$ for constructing the sparse random projection matrix, $O(mkd)$ for random projection across the $k$ powers of $A$, and $O(nkd)$ for merging embedding matrices. Overall, the time complexity of FastRP is
+\[
+O\bigl((n+m)kd\bigr),
+\]
+which is linear in the number of nodes and edges in $G$.
+
+\subsection{Implementation, Parallelization and Hyperparameter Tuning}
+
+\paragraph{Implementation.}
+The implementation of FastRP is very simple and straightforward, with less than 100 lines of Python code.
+
+\paragraph{Parallelization.}
+Besides ease of implementation, the algorithm is also easy to parallelize, since the only operation involved is matrix multiplication. One easy way to speed up matrix multiplication $C=A\cdot B$ is to perform block partitioning on the input matrices:
+\begin{equation}
+A = \begin{pmatrix} A_{11} & A_{12} \\ A_{21} & A_{22} \end{pmatrix}, \qquad
+B = \begin{pmatrix} B_{11} & B_{12} \\ B_{21} & B_{22} \end{pmatrix}.
+\end{equation}
+Then
+\begin{equation}
+C = \begin{pmatrix}
+A_{11}B_{11}+A_{12}B_{21} & A_{11}B_{12}+A_{12}B_{22} \\
+A_{21}B_{11}+A_{22}B_{21} & A_{21}B_{12}+A_{22}B_{22}
+\end{pmatrix}.
+\end{equation}
+The recursive matrix multiplications and summations can be performed in parallel.
+
+\paragraph{Efficient hyperparameter tuning.}
+FastRP also allows highly efficient hyperparameter tuning. The idea is to first pre-compute the embeddings $N_1,N_2,\ldots,N_k$ derived from different orders of proximity matrices. Since the final embedding matrix is a weighted combination of these matrices, only weighted summation is required during hyperparameter optimization. Furthermore, according to the Johnson--Lindenstrauss lemma [12], the embedding dimensionality $d$ determines the approximation error of random projection. This implies that hyperparameters can be efficiently tuned on smaller values of $d$, in contrast to most existing algorithms, which require retraining of the entire model for each hyperparameter configuration.
+
+\section{Experiments}
+
+This section evaluates the performance of FastRP. It first provides an overview of the datasets. Then, it compares FastRP with several baseline methods both in terms of running time and performance on downstream tasks. Finally, it discusses the performance of the method with regard to important hyperparameters and scalability.
+
+\subsection{Datasets}
+
+\begin{table}[H]
+\centering
+\caption{Statistics of the graphs used in the experiments.}
+\label{tab:datasets}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Name & \# Vertices & \# Edges & \# Classes & Task \\
+\midrule
+WWW-200K & 200,000 & 32,822,166 & -- & K-Nearest Neighbors \\
+WWW-10K & 10,000 & 3,904,610 & 50 & Node Classification \\
+Blogcatalog & 10,312 & 333,983 & 39 & Node Classification \\
+Flickr & 80,513 & 5,899,882 & 195 & Node Classification \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The datasets used in the experiments are:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{WWW-200K and WWW-10K [11]:} graphs derived from the Web graph provided by Common Crawl, where nodes are hostnames and edges are hyperlinks between websites. The graph is treated as undirected. The original graph has 385 million nodes and 2.5 billion edges, so subgraphs are constructed by taking the top 200,000 and 10,000 websites respectively as ranked by harmonic centrality [6]. The WWW-10K graph is also used for node classification, where the label of a node is its top-level domain name such as .org, .edu and .es.
+    \item \textbf{Blogcatalog [31]:} a network between bloggers on the Blogcatalog website. The labels are the categories a blogger publishes in.
+    \item \textbf{Flickr [31]:} a network between users on the photo sharing website Flickr. The labels represent the interest groups a user joins.
+\end{itemize}
+
+\subsection{Baseline Methods}
+
+FastRP is compared against the following baseline methods:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{DeepWalk [23]} --- samples short random walks from the input graph, then feeds these random walks into Skip-gram to produce node embeddings.
+    \item \textbf{node2vec [16]} --- extends DeepWalk by performing biased random walks that balance between DFS and BFS, while also adopting SGNS as the dimension reduction method.
+    \item \textbf{LINE [30]} --- samples node pairs that are either adjacent or two hops away, and uses Skip-gram with negative sampling.
+    \item \textbf{RandNE [38]} --- constructs a node similarity matrix that preserves high-order proximity by raising the adjacency (or transition) matrix to the $k$-th power, then applies Gaussian random projection.
+\end{itemize}
+
+The paper notes that many other recently proposed network embedding methods are not included as baselines because their performance is generally inferior to DeepWalk according to a recent comparative study [18], and many of them are not scalable.
+
+\subsection{Parameter Settings}
+
+For FastRP, the embedding dimensionality is set to $d=512$ and maximum power to $k=4$. For the weights $\alpha_1,\alpha_2,\ldots,\alpha_k$, the paper observes that a weighted combination of $A^3$ and $A^4$ is already enough for competitive results. Thus, $\alpha_1,\alpha_2,\alpha_3$ are set to $0,0,1$ respectively and $\alpha_4$ is tuned.
+
+Overall, the model has only two hyperparameters to tune: normalization strength $\beta$ and the weight $\alpha_4$ for $A^4$. Optuna is used to tune them for 20 rounds on a small validation set of 1\% labeled data; the search ranges for $\beta$ and $\alpha_4$ are set to $[-1,0]$ and $[2^{-3},2^6]$ respectively. A lower embedding dimensionality of $d=64$ is also used to speed up the tuning process.
+
+For RandNE, the embedding dimensionality is set to $512$ and maximum order to $q=3$. Incorporating embeddings from $A^4$ does not improve quality according to the experiments. To ensure a fair comparison, hyperparameter search for the weights in RandNE is conducted using the same procedure as FastRP; the difference is that instead of tuning $\beta$ and $\alpha_4$, the weights of $A^2$ and $A^3$ are optimized.
+
+For DeepWalk, the recommended hyperparameter settings from the original paper are used: number of random walks $\gamma=80$, walk length $t=40$, window size $w=10$, and representation size $d=128$.
+
+Since node2vec is built upon DeepWalk, the same parameter settings are used for node2vec, namely $\gamma=80$, $t=40$, $w=10$, $d=128$. For the in-out parameter $p$ and return parameter $q$, grid search is conducted over $p,q \in \{0.25,0.50,1,2,4\}$.
+
+For LINE, both first-order and second-order proximity are used with the recommended hyperparameters: embedding dimensionality $200$, number of node-pair samples $10$ billion, and number of negative samples $5$.
+
+All experiments are conducted on a single machine with 128 GB memory and 40 CPU cores at 2.2 GHz. FastRP and all baseline methods support multithreading, but for a fair running time comparison, all methods are run with a single thread and CPU time is measured.
+
+\subsection{Runtime Comparison}
+
+\begin{table}[H]
+\centering
+\caption{CPU time comparison on all test datasets. FastRP is over 4,000 times faster than the state-of-the-art algorithm DeepWalk.}
+\label{tab:runtime}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Dataset & FastRP & RandNE & LINE & DeepWalk & node2vec & Speedup over DeepWalk \\
+\midrule
+WWW-200K & 136.0 seconds & 169.8 seconds & 4.6 hours & 6.9 days & 63.8 days & 4383$\times$ \\
+WWW-10K & 7.8 seconds & 13.6 seconds & 3.2 hours & 9.2 hours & 59.8 hours & 4246$\times$ \\
+Blogcatalog & 6.0 seconds & 10.5 seconds & 3.0 hours & 8.7 hours & 41.2 hours & 5220$\times$ \\
+Flickr & 33.1 seconds & 45.1 seconds & 4.2 hours & 3.1 days & 28.5 days & 8091$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FastRP achieves at least 4,000$\times$ speedup over the state-of-the-art method DeepWalk. For example, it takes FastRP less than three minutes to embed the WWW-200K graph, whereas DeepWalk takes almost a week to finish. node2vec is even slower. Although LINE is several times faster than DeepWalk and node2vec, it is still a few hundred times slower than FastRP. The only method with comparable running time is RandNE, which uses Gaussian random projection for dimension reduction, but it is still slightly slower than FastRP.
+
+\subsection{Qualitative Case Study: WWW-200K Network}
+
+The paper conducts a case study on the WWW-200K network to compare the embeddings produced by different network embedding algorithms qualitatively. RandNE and DeepWalk are used as baselines since the results produced by LINE and node2vec are very similar to those of DeepWalk on this network.
+
+Examining the $K$-nearest neighbors (KNN) of a word is a common way to measure the quality of word embeddings [22]. In the same spirit, the paper examines the $K$-nearest neighbors of several representative websites in the node embedding space. Cosine similarity is used as the similarity metric.
+
+\begin{table}[H]
+\centering
+\caption{Top 5 nearest neighbors of four representative websites calculated from the node embeddings generated by FastRP, DeepWalk and RandNE respectively. Rows are arranged from highest cosine similarity to lowest cosine similarity.}
+\label{tab:neighbors}
+\small
+\begin{tabular}{@{}lllllll@{}}
+\toprule
+\multicolumn{1}{c}{\textbf{Website}} & \multicolumn{3}{c}{\textbf{Method}} & \multicolumn{1}{c}{\textbf{Website}} & \multicolumn{2}{c}{\textbf{Method}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){6-7}
+ & FastRP & DeepWalk & RandNE &  & FastRP / DeepWalk / RandNE & \\
+\midrule
+\texttt{nytimes.com} & huffingtonpost.com & washingtonpost.com & huffingtonpost.com & \texttt{delta.com} & aa.com / aa.com / aa.com & \\
+ & washingtonpost.com & huffingtonpost.com & washingtonpost.com &  & united.com / united.com / southwest.com & \\
+ & cnn.com & cnn.com & forbes.com &  & usairways.com / usairways.com / united.com & \\
+ & npr.org & cbsnews.com & cnn.com &  & alaskaair.com / southwest.com / expedia.com & \\
+ & latimes.com & time.com & npr.org &  & jetblue.com / jetblue.com / priceline.com & \\
+\midrule
+\texttt{vldb.org} & sigmod.org & sigmod.org & comp.nus.edu.sg & \texttt{arsenal.com} & chelseafc.com / chelseafc.com / liverpoolfc.com & \\
+ & comp.nus.edu.sg & morganclaypool.com & cs.sfu.ca &  & mcfc.co.uk / tottenhamhotspur.com / manutd.com & \\
+ & sigops.org & kdd.org & cs.rpi.edu &  & nufc.co.uk / manutd.com / chelseafc.com & \\
+ & cidrdb.org & doi.acm.org & nlp.stanford.edu &  & avfc.co.uk / mcfc.co.uk / skysports.com & \\
+ & cse.iitb.ac.in & informatic.uni-trier.de & theory.stanford.edu &  & tottenhamhotspur.com / thefa.com / tottenhamhotspur.com & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For \texttt{nytimes.com}, all three methods produce high-quality nearest neighbors: \texttt{huffingtonpost.com}, \texttt{washingtonpost.com} and \texttt{cnn.com} are well-known American news sites. It is also interesting that FastRP lists \texttt{latimes.com} among the top five nearest neighbors.
+
+For \texttt{delta.com}, FastRP and DeepWalk identify the official websites of other major American airlines such as American Airlines, United Airlines and Alaska Airlines. The nearest-neighbor list provided by RandNE is worse, since it includes general-purpose travel websites such as \texttt{expedia.com} and \texttt{priceline.com}.
+
+For \texttt{vldb.org}, both FastRP and DeepWalk list \texttt{sigmod.org} as the most similar website, which is a positive sign since SIGMOD is another top database research conference. RandNE instead returns mainly CS department websites.
+
+For \texttt{arsenal.com}, all three methods list other football clubs in the Premier League as nearest neighbors. The only exception is that RandNE also lists \texttt{skysports.com}, which has higher popularity but is less relevant to \texttt{arsenal.com}. In contrast, FastRP avoids this problem by properly downweighting the influence of popular nodes.
+
+Overall, the quality of nearest neighbors produced by FastRP is comparable to DeepWalk and significantly better than that of RandNE.
+
+\subsection{Multi-label Node Classification}
+
+For node classification, the same experimental setup as DeepWalk [23] is used. A portion of nodes along with their labels are randomly sampled from the graph as training data, and the goal is to predict the labels for the remaining nodes. A one-vs-rest logistic regression model with $L_2$ regularization is trained on the node embeddings for prediction, using the logistic regression model implemented by LibLinear [13]. The process is repeated 10 times and the average Macro-F1 score is reported.
+
+\begin{table}[H]
+\centering
+\caption{Macro-F1 scores of all methods on WWW-10K, BlogCatalog, and Flickr in percentage.}
+\label{tab:f1}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Algorithm & WWW-10K & BlogCatalog & Flickr \\
+\midrule
+LINE & 6.66 & 19.63 & 10.69 \\
+node2vec & 27.42 & 21.44 & 11.89 \\
+DeepWalk & 25.54 & 21.30 & 14.00 \\
+RandNE & 15.68 & 20.88 & 13.64 \\
+FastRP & 26.92 & 23.43 & 15.02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FastRP achieves the state-of-the-art result on two out of three datasets and essentially matches the best on the third. On Blogcatalog and Flickr, FastRP achieves gains of 9.3\% and 7.3\% over the best-performing baseline method respectively. On WWW-10K, the absolute difference in F1 score between FastRP and node2vec is only 0.5\%, but FastRP is over 10,000 times faster.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{fig2.png}
+    \caption{Detailed multi-label classification result on WWW-10K, BlogCatalog, and Flickr.}
+    \label{fig:fig2}
+\end{figure}
+
+The paper varies the portion of labeled nodes for classification and presents the macro-F1 scores in Figure~\ref{fig:fig2}. FastRP consistently outperforms or matches the other neural baseline methods while being at least three orders of magnitude faster. It also always outperforms RandNE by a large margin, proving the effectiveness of the proposed node similarity matrix design.
+
+\subsection{Parameter Sensitivity}
+
+To examine how the hyperparameters affect the quality of learned representations, the paper conducts a parameter sensitivity study on BlogCatalog. The parameters investigated are the normalization strength $\beta$, the weight $\alpha_4$ of $A^4$, and the embedding dimensionality $d$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{fig3.png}
+    \caption{Parameter sensitivity study on Blogcatalog.}
+    \label{fig:fig3}
+\end{figure}
+
+Figure~\ref{fig:fig3}(a) shows the effectiveness of the normalization scheme. At $\beta=-0.9$, FastRP achieves the highest F1 score of over 20.6\%. By setting $\beta$ to 0.0, no normalization is applied to the node similarity matrix and the F1 score drops to 19.5\%. The embedding dimensionality is set to $d=128$ for this experiment.
+
+Figure~\ref{fig:fig3}(b) shows that the weight $\alpha_4$ also plays an important role. The best F1 score is achieved when $\alpha_4$ is set to 2 or 4 on this dataset.
+
+Figure~\ref{fig:fig3}(c) shows that increasing the embedding dimensionality generally yields better node embeddings. On the other hand, FastRP already achieves better performance than all baseline methods with embedding dimensionality of 256.
+
+\subsection{Scalability}
+
+In Section 3.4, the paper shows that the time complexity of FastRP is linear in the number of nodes $n$ and edges $m$. This is empirically verified by learning embeddings on random graphs generated by the Erd\H{o}s--R\'enyi model.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{fig4.png}
+    \caption{Scalability study on Erd\H{o}s--R\'enyi graphs.}
+    \label{fig:fig4}
+\end{figure}
+
+In Figure~\ref{fig:fig4}(a), $m$ is fixed to $10^7$ and $n$ is varied from $10^5$ to $10^6$. In Figure~\ref{fig:fig4}(b), $n$ is fixed to $10^6$ and $m$ is varied from $10^7$ to $10^8$. In both cases, the CPU time for FastRP to embed the graph is reported. The empirical running time also scales linearly with $n$ and $m$.
+
+\section{Related Work}
+
+Most early methods view network embeddings as a dimension reduction problem, where the goal is to preserve local or global distances between data points in a low-dimensional manifold [4, 27, 32]. With time complexity at least quadratic in the number of data points (or nodes), these methods do not scale to graphs with hundreds of thousands of nodes.
+
+Inspired by the success of scalable neural methods for learning word embeddings, especially Skip-gram [22], neural methods are proposed for network embeddings [16, 23, 30]. These methods typically sample node pairs that are close to each other and then train a Skip-gram model on the pairs to obtain node embeddings. The difference mostly lies in the strategy for node-pair sampling. DeepWalk [23] samples node pairs that are at most $k$ hops away via random walking on the graph. Node2vec [16] introduces a biased random walk strategy using a mixture of DFS and BFS. LINE [30] considers node pairs that are 1-hop or 2-hops away from each other. These methods not only produce high-quality node embeddings but also scale to networks with millions of nodes.
+
+Following Levy and Goldberg's interpretation of Skip-gram with negative sampling as implicit matrix factorization [19], it has been shown that methods like DeepWalk [23], LINE [30], PTE [29] and node2vec [16] all implicitly approximate and factorize a node similarity matrix, usually some transformation of the $k$-step transition matrices $A^k$ [26, 37]. Matrix-factorization-based methods are therefore also proposed for network embeddings [7, 26, 37]. A representative method is GraRep [7], which can be seen as the matrix-factorization version of DeepWalk: it uses SVD to factorize the shifted PMI matrix of $k$-step transition matrices.
+
+However, GraRep is not scalable due to the high time complexity of both raising the transition matrix $A$ to higher powers and taking the element-wise logarithm of $A^k$, which is a dense $n \times n$ matrix.
+
+A few recent works therefore propose to speed up the construction of such a node similarity matrix [25, 26, 39], drawing inspiration from spectral graph theory. The basic idea is that if the top-$h$ eigendecomposition of $A$ is given by $A = U_h \Lambda_h U_h^\top$, then $A^k$ can be approximated with $U_h \Lambda_h^k U_h^\top$ [26, 39]. The major drawback of these methods is that they need to remove the element-wise normalization (such as taking logarithm) on $A^k$ to achieve better scalability; this harms the quality of embeddings [8]. A recent method [25] proposes to sparsify $A^k$ for better scalability. However, the similarity matrix is still dense even after sparsification: for a graph with $n=10^6$ nodes and $m=10^7$ edges, the number of entries in the sparsified matrix can be as high as $1.4 \times 10^{11}$ [25].
+
+Perhaps the most relevant work is RandNE [38], which considers a Gaussian random projection approach for network embeddings. The paper highlights three key differences between FastRP and RandNE:
+\begin{enumerate}[leftmargin=1.5em]
+    \item FastRP identifies two key factors for constructing the node similarity matrix: high-order proximity preservation and element normalization. The importance of normalization is overlooked in many previous studies, including RandNE [26, 38, 39].
+    \item Based on theoretical analysis, FastRP derives a normalization algorithm that properly downweights the influence of high-degree nodes in the node similarity matrix. An additional advantage is that this normalization can be formalized as simple matrix multiplication, enabling fast iterative computation when combined with random projection.
+    \item FastRP explores very sparse random projection for network embeddings, which is more efficient than traditional Gaussian random projection. Experimental results show that FastRP achieves substantially better performance on challenging downstream tasks while also being faster.
+\end{enumerate}
+
+The paper is also related to graph-based recommendation systems, which consider a special kind of graph: the bipartite graph between users and items. Several early works in this field emphasize the importance of high-order, transitive relationships between users and items [9, 10, 14, 24] for top-$K$ recommendation. Fouss et al. [14, 24] present $P^3$, which directly uses the entries in the third power of the transition matrix to rank items. Although achieving competitive recommendation performance, it is observed that the ranking of items in $P^3$ is strongly influenced by the popularity of items [9, 10]. To this end, $P^3_\alpha$ [10] and $RP^3_\beta$ [9] are proposed as re-weighted versions of $P^3$. Their idea of downweighting popular items is similar to the normalization strategy in this paper. However, these methods are proposed as heuristics specifically for bipartite graphs and top-$K$ recommendation, which do not generalize to other scenarios. Moreover, the power of the transition matrix is either computed exactly [10] or approximated by sampling a significant number of random walks [9], both of which are not scalable.
+
+\section{Conclusion}
+
+FastRP is a scalable algorithm for obtaining distributed representations of nodes in a graph. It first constructs a node similarity matrix that captures high-order proximity between nodes and then normalizes the matrix entries based on the convergence properties of $A^k$. Very sparse random projection is applied to this similarity matrix to obtain node embeddings. Experimental results show that FastRP achieves three orders of magnitude speedup over the state-of-the-art method DeepWalk while producing embeddings of comparable or even better quality.
+
+\section*{Acknowledgements}
+
+This work was partially supported by NSF grants IIS-1546113 and IIS-1927227.
+
+\section*{References}
+\begin{enumerate}[leftmargin=1.5em]
+    \item Dimitris Achlioptas. 2003. Database-friendly random projections: Johnson-Lindenstrauss with binary coins. \emph{Journal of Computer and System Sciences} 66(4), 671--687.
+    \item Rosa I. Arriaga and Santosh Vempala. 1999. An algorithmic theory of learning: Robust concepts and random projection. In \emph{40th Annual Symposium on Foundations of Computer Science}. IEEE, 616--623.
+    \item Albert-L\'aszl\'o Barab\'asi and Eric Bonabeau. 2003. Scale-free networks. \emph{Scientific American} 288(5), 60--69.
+    \item Mikhail Belkin and Partha Niyogi. 2002. Laplacian eigenmaps and spectral techniques for embedding and clustering. In \emph{Advances in Neural Information Processing Systems}, 585--591.
+    \item Robert D. Blumofe, Christopher F. Joerg, Bradley C. Kuszmaul, Charles E. Leiserson, Keith H. Randall, and Yuli Zhou. 1996. Cilk: An efficient multithreaded runtime system. \emph{Journal of Parallel and Distributed Computing} 37(1), 55--69.
+    \item Paolo Boldi and Sebastiano Vigna. 2014. Axioms for centrality. \emph{Internet Mathematics} 10(3--4), 222--262.
+    \item Shaosheng Cao, Wei Lu, and Qiongkai Xu. 2015. GraRep: Learning graph representations with global structural information. In \emph{CIKM}. ACM, 891--900.
+    \item Siheng Chen, Sufeng Niu, Leman Akoglu, Jelena Kova\v{c}evi\'c, and Christos Faloutsos. 2017. Fast, warped graph embedding: Unifying framework and one-click algorithm. \emph{arXiv preprint arXiv:1702.05764}.
+    \item Fabian Christoffel, Bibek Paudel, Chris Newell, and Abraham Bernstein. 2015. Blockbusters and wallflowers: Accurate, diverse, and scalable recommendations with random walks. In \emph{Proceedings of the 9th ACM Conference on Recommender Systems}. ACM, 163--170.
+    \item Colin Cooper, Sang Hyuk Lee, Tomasz Radzik, and Yiannis Siantos. 2014. Random walks in recommender systems: exact computation and simulations. In \emph{Proceedings of the 23rd International Conference on World Wide Web}. ACM, 811--816.
+    \item Common Crawl. [n.d.]. Common Crawl's Web graph data. Accessed: 2018-12-01.
+    \item Sanjoy Dasgupta and Anupam Gupta. 1999. An elementary proof of the Johnson-Lindenstrauss lemma. \emph{International Computer Science Institute, Technical Report} 22(1), 1--5.
+    \item Rong-En Fan, Kai-Wei Chang, Cho-Jui Hsieh, Xiang-Rui Wang, and Chih-Jen Lin. 2008. LIBLINEAR: A library for large linear classification. \emph{Journal of Machine Learning Research} 9, 1871--1874.
+    \item Francois Fouss, Alain Pirotte, and Marco Saerens. 2005. A novel way of computing similarities between nodes of a graph, with application to collaborative recommendation. In \emph{Proceedings of the 2005 IEEE/WIC/ACM International Conference on Web Intelligence}. IEEE Computer Society, 550--556.
+    \item Georg Frobenius. 1912. \"Uber Matrizen aus nicht negativen Elementen.
+    \item Aditya Grover and Jure Leskovec. 2016. node2vec: Scalable feature learning for networks. In \emph{Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}. ACM, 855--864.
+    \item Nathan Halko, Per-Gunnar Martinsson, and Joel A. Tropp. 2011. Finding structure with randomness: Probabilistic algorithms for constructing approximate matrix decompositions. \emph{SIAM Review} 53(2), 217--288.
+    \item Megha Khosla, Avishek Anand, and Vinay Setty. 2019. A comprehensive comparison of unsupervised network representation learning methods. \emph{arXiv preprint arXiv:1903.07902}.
+    \item Omer Levy and Yoav Goldberg. 2014. Neural word embedding as implicit matrix factorization. In \emph{Advances in Neural Information Processing Systems}, 2177--2185.
+    \item Ping Li, Trevor J. Hastie, and Kenneth W. Church. 2006. Very sparse random projections. In \emph{Proceedings of the 12th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}. ACM, 287--296.
+    \item Laurens van der Maaten and Geoffrey Hinton. 2008. Visualizing data using t-SNE. \emph{Journal of Machine Learning Research} 9, 2579--2605.
+    \item Tomas Mikolov, Kai Chen, Greg Corrado, and Jeffrey Dean. 2013. Efficient estimation of word representations in vector space. \emph{arXiv preprint arXiv:1301.3781}.
+    \item Bryan Perozzi, Rami Al-Rfou, and Steven Skiena. 2014. DeepWalk: Online learning of social representations. In \emph{Proceedings of the 20th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}. ACM, 701--710.
+    \item Alain Pirotte, Jean-Michel Renders, Marco Saerens, et al. 2007. Random-walk computation of similarities between nodes of a graph with application to collaborative recommendation. \emph{IEEE Transactions on Knowledge \& Data Engineering} 3, 355--369.
+    \item Jiezhong Qiu, Yuxiao Dong, Hao Ma, Jian Li, Chi Wang, and Kuansan Wang. 2019. NetSMF: Large-scale network embedding as sparse matrix factorization.
+    \item Jiezhong Qiu, Yuxiao Dong, Hao Ma, Jian Li, Kuansan Wang, and Jie Tang. 2018. Network embedding as matrix factorization: Unifying DeepWalk, LINE, PTE, and node2vec. In \emph{Proceedings of the Eleventh ACM International Conference on Web Search and Data Mining}. ACM, 459--467.
+    \item Sam T. Roweis and Lawrence K. Saul. 2000. Nonlinear dimensionality reduction by locally linear embedding. \emph{Science} 290(5500), 2323--2326.
+    \item Gerard Salton and Christopher Buckley. 1988. Term-weighting approaches in automatic text retrieval. \emph{Information Processing \& Management} 24(5), 513--523.
+    \item Jian Tang, Meng Qu, and Qiaozhu Mei. 2015. PTE: Predictive text embedding through large-scale heterogeneous text networks. In \emph{Proceedings of the 21st ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}. ACM, 1165--1174.
+    \item Jian Tang, Meng Qu, Mingzhe Wang, Ming Zhang, Jun Yan, and Qiaozhu Mei. 2015. LINE: Large-scale information network embedding. In \emph{Proceedings of the 24th International Conference on World Wide Web}, 1067--1077.
+    \item Lei Tang and Huan Liu. 2009. Scalable learning of collective behavior based on sparse social dimensions. In \emph{Proceedings of the 18th ACM Conference on Information and Knowledge Management}. ACM, 1107--1116.
+    \item Joshua B. Tenenbaum, Vin de Silva, and John C. Langford. 2000. A global geometric framework for nonlinear dimensionality reduction. \emph{Science} 290(5500), 2319--2323.
+    \item Anton Tsitsulin, Davide Mottin, Panagiotis Karras, and Emmanuel M\"uller. 2018. VERSE: Versatile graph embeddings from similarity measures. In \emph{Proceedings of the 2018 World Wide Web Conference}, 539--548.
+    \item John W. Tukey et al. 1957. On the comparative anatomy of transformations. \emph{The Annals of Mathematical Statistics} 28(3), 602--632.
+    \item Santosh S. Vempala. 2005. \emph{The Random Projection Method}. Vol. 65. American Mathematical Society.
+    \item Daixin Wang, Peng Cui, and Wenwu Zhu. 2016. Structural deep network embedding. In \emph{Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining}. ACM, 1225--1234.
+    \item Cheng Yang, Zhiyuan Liu, Deli Zhao, Maosong Sun, and Edward Chang. 2015. Network representation learning with rich text information. In \emph{Twenty-Fourth International Joint Conference on Artificial Intelligence}.
+    \item Ziwei Zhang, Peng Cui, Haoyang Li, Xiao Wang, and Wenwu Zhu. 2018. Billion-scale network embedding with iterative random projection. In \emph{2018 IEEE International Conference on Data Mining (ICDM)}. IEEE, 787--796.
+    \item Ziwei Zhang, Peng Cui, Xiao Wang, Jian Pei, Xuanrong Yao, and Wenwu Zhu. 2018. Arbitrary-order proximity preserved network embedding. In \emph{Proceedings of the 24th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining}. ACM, 2778--2786.
+\end{enumerate}
+
+\end{document}

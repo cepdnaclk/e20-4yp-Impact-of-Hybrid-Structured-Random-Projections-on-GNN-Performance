@@ -1,0 +1,385 @@
+% IEEE Conference Template - Abstract Section
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\makeatletter
+\newcommand{\linebreakand}{%
+  \end{@IEEEauthorhalign}
+  \hfill\mbox{}\par
+  \mbox{}\hfill\begin{@IEEEauthorhalign}
+}
+\makeatother
+
+\begin{document}
+
+\title{Hybrid Random Projections for Enhanced Graph Embeddings in Neural Networks: A Literature Review}
+
+\author{
+    \IEEEauthorblockN{H.A.D.T.N. Haththella}
+    \IEEEauthorblockA{\textit{Dept. of Computer Engineering} \\
+    \textit{University of Peradeniya}\\
+    Sri Lanka \\
+    e20133@eng.pdn.ac.lk}
+    \and
+    \IEEEauthorblockN{L.R.S.R. Premasiri}
+    \IEEEauthorblockA{\textit{Dept. of Computer Engineering} \\
+    \textit{University of Peradeniya}\\
+    Sri Lanka \\
+    e20305@eng.pdn.ac.lk}
+    \and
+    \IEEEauthorblockN{A.N.T. Somathilaka}
+    \IEEEauthorblockA{\textit{Dept. of Computer Engineering} \\
+    \textit{University of Peradeniya}\\
+    Sri Lanka \\
+    e20381@eng.pdn.ac.lk}
+    \linebreakand % <--- THIS IS THE CHANGE
+    \IEEEauthorblockN{Sampath Deegalla}
+    \IEEEauthorblockA{\textit{Dept. of Computer Engineering} \\
+    \textit{University of Peradeniya}\\
+    Sri Lanka \\
+    sampath@eng.pdn.ac.lk}
+}
+\maketitle
+
+\begin{abstract}
+Graph Neural Networks (GNNs) have emerged as powerful tools for learning from graph-structured data, yet they face significant computational challenges when scaling to large networks. This literature review investigates Hybrid Random Projections (HRP) as a promising dimensionality reduction technique for improving graph embeddings while maintaining computational efficiency and structural preservation. Traditional random projection methods, theoretically grounded in the Johnson-Lindenstrauss lemma, have demonstrated effectiveness in reducing high-dimensional data, but often fail to preserve the important topological features present in graph structures. HRP addresses these limitations by combining classical random projections with structured matrices and feature-adaptive components, offering enhanced preservation of graph properties such as community structure, node proximities, and relational patterns. Through an analysis of multiple papers spanning random projection theory, graph embedding techniques, and GNN architectures, this review synthesizes key findings on HRP's theoretical foundations, computational advantages, and empirical performance. We examine comparative studies demonstrating HRP's superiority over conventional methods like FastRP, DeepWalk, and RandNE in terms of accuracy, scalability, and memory efficiency on benchmark datasets including Open Graph Benchmark collections. Critical evaluation reveals significant research gaps, particularly the absence of comprehensive benchmarking studies systematically comparing HRP against traditional random projection methods across diverse, large-scale graph datasets with realistic data splits. This review establishes the foundation for future empirical research investigating HRP's potential to advance graph embedding techniques in neural networks, highlighting opportunities for developing more efficient and accurate graph learning systems capable of handling billion-scale networks.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Hybrid Random Projections, Graph Neural Networks, Graph Embeddings, Dimensionality Reduction, Network Representation Learning, Johnson-Lindenstrauss Lemma, Scalability
+\end{IEEEkeywords}
+
+% IEEE Conference Template - Introduction Section
+\section{Introduction}
+
+The proliferation of graph-structured data in domains such as social networks and biological systems has driven significant advances in graph-based machine learning \cite{khemani2024, gkarmpounis2024}. While Graph Neural Networks (GNNs) have become the dominant paradigm for tasks like node classification \cite{hu2020ogb}, traditional architectures face substantial computational bottlenecks when scaling to billion-node networks.
+
+Dimensionality reduction techniques offer a solution to these scalability challenges. Random projections (RP) are particularly effective due to their computational efficiency and the Johnson-Lindenstrauss lemma, which allows high-dimensional data to be projected into lower dimensions while approximately preserving pairwise distances \cite{johnson1984, achlioptas2003}. This has motivated scalable embedding methods such as DeepWalk \cite{perozzi2014}, RandNE \cite{zhang2018randne}, and SketchNE \cite{xie2023sketchne}.
+
+However, conventional RP methods often fail to adequately preserve node similarities and ranking quality, especially for low and high degree nodes \cite{tadic2024} While specific embedding methods like Community-Preserving Network Embedding (CPNE) have been developed to explicitly model these meso-scale structures \cite{wang2017cpne}, they often require complex dual-objective optimization that limits scalability compared to projection-based methods. This structural degradation negatively impacts downstream performance, as effective embeddings must capture both pairwise proximities and higher-order properties.
+
+Hybrid Random Projections (HRP) address these limitations by combining Gaussian and Bernoulli random matrices into a single optimized projection operator \cite{yahaya2025hrp}. By incorporating domain-specific information, HRP aims to balance the computational speed of random projections with superior topological preservation. While recent work demonstrates HRP's potential in areas like heterogeneous graph learning \cite{hu2021rphgnn, nguyen2016}, its specific application to graph embeddings requires further exploration.
+
+This literature review synthesizes findings from multiple papers to examine the theoretical and methodological foundations of HRP for graph embeddings. We analyze the mathematical underpinnings of RP, the limitations of current techniques, and the emergence of HRP methods, with the objective of evaluating their potential to advance scalable and accurate graph learning systems.
+
+
+
+\subsection{Scope and Organization}
+
+The remainder of this review is organized as follows: Section II establishes theoretical foundations regarding dimensionality reduction and graph embeddings. Section III examines the development of Hybrid Random Projections (HRP). Section IV surveys current embedding techniques and HRP applications. Finally, Sections V through VII present a critical evaluation of existing literature, identify research gaps, and suggest directions for future inquiry.
+
+\section{Background and Theoretical Foundation}
+
+\subsection{Dimensionality Reduction and Random Projections}
+
+Dimensionality reduction addresses the curse of dimensionality by compressing data while preserving essential information. While traditional methods like Principal Component Analysis (PCA) and Linear Discriminant Analysis (LDA) are effective, they incur computational costs that are often prohibitive for large-scale datasets \cite{xie2018survey, siddharth2017randpro}.
+
+Random Projections (RP) offer a computationally efficient alternative grounded in the Johnson-Lindenstrauss (JL) lemma \cite{johnson1984}. This lemma states that $n$ points in high-dimensional space can be mapped to $O(\log n)$ dimensions with bounded distortion. Formally, for $0 < \epsilon < 1$, there exists a linear mapping $f: \mathbb{R}^d \rightarrow \mathbb{R}^k$ where $k = O(\epsilon^{-2} \log n)$ such that for all $u, v$:
+\begin{equation}
+(1-\epsilon)||u-v||^2 \leq ||f(u)-f(v)||^2 \leq (1+\epsilon)||u-v||^2
+\end{equation}
+
+Practical implementation typically involves multiplication with a random matrix $R$. Achlioptas demonstrated that sparse binary matrices (entries from $\{-1, 0, +1\}$) maintain these properties while significantly improving computational and memory efficiency, enabling application to massive datasets \cite{achlioptas2003, blum2006}.
+
+Random projection extends beyond classical dimensionality reduction and offers several benefits across modern machine learning pipelines. Studies have shown that it can accelerate neural network training \cite{cai2019enhanced, rpdeep2020}, and in visual object tracking, orthogonal random projections have been successfully used to compress deep CNN feature maps while preserving discriminative power \cite{zhang2021correlation}. Additionally, random projection contributes to improved adversarial robustness \cite{nguyen2016}, serves as an effective regularizer that reduces overfitting \cite{tasoulis2020}, and has demonstrated versatility across applications such as anomaly detection \cite{bauw2021} and large scale malware classification\cite{dahl2013malware}.
+
+\subsection{Graph Embeddings}
+
+Graph embedding techniques map nodes or edges to low-dimensional vectors while preserving structural properties such as community membership and proximity \cite{xie2017survey}.
+
+A major shift in graph representation learning came with the introduction of random-walk-based embedding methods inspired by probabilistic models in text analysis \cite{mimno2012random}. DeepWalk pioneered this by applying Skip-Gram language models to random walks to learn latent representations \cite{perozzi2014}. Subsequent refinements include Node2vec \cite{grover2016node2vec}, which introduces biased exploration strategies; LINE\cite{tang2015line}, which explicitly preserves first- and second-order proximities; Addressing the limitations of these methods on directed networks, HOPE introduces the concept of asymmetric transitivity, utilizing high-order proximity measures like Katz Index and Rooted PageRank to preserve directional relationships \cite{ou2016atp}. and GraphSAGE, which enables inductive learning via neighborhood aggregation \cite{khemani2024}.
+Complementary to proximity-based methods, Community-Preserving Network Embedding (CPNE, also referred to as M-NMF) augments the embedding objective with a modularity-based community term, explicitly encouraging nodes within the same community to share similar representations \cite{wang2017cpne}. This improves meso-scale structure preservation, but comes at the cost of higher computational complexity compared to purely proximity- or projection-based approaches.
+
+Random projection-based methods specifically address scalability bottlenecks. RandNE employs iterative projections to preserve high-order proximities without expensive matrix factorization \cite{zhang2018randne}. SketchNE combines sketching with randomized SVD to process billion-node graphs rapidly \cite{xie2023sketchne}. Similarly, FastRP achieves high-speed embedding through sparse random projections combined with iterative feature propagation \cite{chen2019fast}.Additionally, NetSMF utilizes sparse matrix factorization to approximate DeepWalk's objective without constructing dense matrices, validating that sparse operations are key to handling billion-scale networks \cite{qiu2019netsmf}
+\begin{table}[ht]
+\centering
+\caption{Taxonomy of Graph Embedding Approaches}
+\label{tab:taxonomy}
+\begin{tabular}{ll}
+\toprule
+\textbf{Category} & \textbf{Representative Methods} \\
+\midrule
+Matrix Factorization & HOPE, NetSMF \\
+Random Walk Based & DeepWalk, Node2vec \\
+GNN-Based & GCN, GraphSAGE, GAT \\
+Random Projection Based & RandNE, FastRP, SketchNE \\
+Hybrid RP Based & RpHGNN, RAP-GNN \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Graph Neural Networks}
+
+Graph Neural Networks (GNNs) operate on graph-structured data through iterative message passing, where nodes aggregate information from local neighborhoods to capture multi-hop dependencies \cite{gkarmpounis2024, khemani2024}. Theoretical analysis suggests these mechanisms function similarly to spectral clustering, heavily relying on the graph's spectral properties \cite{li2021message}.
+
+As formalized in the unifying encoder-decoder framework proposed by Hamilton et al. \cite{hamilton2017representation}, GNNs function as encoders that map nodes to embeddings by aggregating local neighborhood information.
+
+Key architectures have evolved to optimize this process. Graph Convolutional Networks (GCNs) employ efficient localized filters based on spectral graph theory. GraphSAGE\cite{khemani2024}extends this with sampling-based aggregation to support inductive learning. Graph Attention Networks (GATs) introduce attention mechanisms to dynamically weight neighbor contributions, while newer models like AAGCN adaptively learn graph topology to address sparsity \cite{wang2021aagcn}.
+
+Despite their success, GNNs face significant challenges, including over-smoothing, scalability bottlenecks on large graphs, and feature collapse \cite{bui2023rap}. These limitations have motivated the integration of Random Projections (RP). For instance, Random Projection Heterogeneous GNN (RpHGNN) compresses graphs to achieve a 230\% speedup over traditional methods \cite{hu2021rphgnn}. Similarly, RAP-GNN utilizes random weights to reduce training time by 6$\times$ and memory usage by 3$\times$ while maintaining comparable performance \cite{bui2023rap}, and RP forest initialization has been shown to improve GCN flexibility \cite{alshammari2020rpforest}.
+
+\subsection{Existing Random Projection Methods for Graphs}
+
+Contemporary RP methods for graph embeddings exhibit distinct trade-offs. FastRP achieves high efficiency through sparse projections but can sacrifice structural preservation \cite{chen2019fast}. DeepWalk offers strong performance via random walk sampling but incurs high computational costs \cite{perozzi2014}. RandNE scales to billion-edge graphs using iterative projections yet struggles to preserve community structures in heterogeneous networks \cite{zhang2018randne}.
+
+These methods share common limitations: the inability to adaptively preserve domain-specific structural features and difficulty balancing computational efficiency with embedding quality. These gaps motivate the development of Hybrid Random Projection approaches that combine the efficiency of RP with structured preservation of graph properties.
+
+
+\section{Hybrid Random Projections: Theory and Development}
+
+\subsection{Overview of Hybrid Random Projections}
+
+
+Hybrid Random Projections (HRP)\cite{yahaya2025hrp} extend traditional Random Projections by combining multiple projection distributions-typically Gaussian and ±1 Bernoulli matrices-through a tunable mixing parameter. Instead of incorporating domain-specific structure, HRP focuses on reducing geometric distortion by optimising this mixture, leading to better preservation of pairwise distances across diverse high-dimensional datasets. While not explicitly designed to preserve topological or hierarchical relationships, the improved distance fidelity can indirectly support tasks sensitive to geometric structure.
+
+Recent formulations explore multiple strategies to enhance the effectiveness of random projections while retaining the computational efficiency associated with the Johnson-Lindenstrauss lemma. These include hybrid projection mechanisms that combine different random matrices to reduce distortion and redundancy \cite{yahaya2025hrp}, as well as feature-adaptive projection schemes that adjust projection behavior based on local signal characteristics to improve robustness and task-specific reliability \cite{yang2021cancelable}.
+
+\subsection{Mathematical and Computational Foundations}
+
+The mathematical framework of HRP extends classical theory by formally defining the projection as $\mathbf{H} = \alpha \mathbf{R} + \beta \mathbf{S}$, where $\mathbf{R}$ represents a standard random matrix, $\mathbf{S}$ encodes structural constraints, and $\alpha, \beta$ control the balance between randomness and structure \cite{yahaya2025hrp}.
+
+To ensure computational efficiency, HRP often utilizes sparse binary matrices, following Achlioptas' database-friendly approach \cite{achlioptas2003}. Feature-adaptive mechanisms further improve random projection pipelines by applying hierarchical selection to identify salient features prior to projection. This approach effectively removes noisy or redundant components while avoiding the expensive matrix inversions typically required in high-dimensional settings \cite{wang2019hierarchical}.
+
+Alternative mathematical formulations have also emerged. Some approaches utilize unsupervised representation learning by predicting distances in the projected space to bypass expensive supervision \cite{wang2020unsupervised}. Others integrate associative-memory mechanisms with embedding models, such as using Modern Hopfield Networks to treat nodes and their neighborhood patterns as stored memories, enabling recurrent retrieval-based embedding generation \cite{le2022associative}.
+
+Kernel approximation provides additional theoretical justification for HRP approaches. Random projections can approximate kernel functions by transforming data into explicit feature spaces that capture kernel properties without requiring expensive kernel computations \cite{blum2006}. The Fastfood algorithm demonstrates that structured random projections achieve kernel approximations in log-linear time, maintaining accuracy while drastically reducing computational costs \cite{le2014fastfood}. These kernel-based perspectives inform HRP designs that balance approximation quality against computational constraints.
+
+\subsection{Benefits of Hybrid Random Projections}
+
+HRP methods deliver multiple advantages over traditional random projections when applied to graph embeddings. Superior structural preservation constitutes the primary benefit, as hybrid approaches explicitly account for graph topology during dimensionality reduction. Empirical studies demonstrate that HRP reduces distortion and improves distance preservation across multiple high-dimensional datasets \cite{yahaya2025hrp}.
+
+Computational efficiency represents another significant advantage.The HRP formulation maintains the computational simplicity of dense random projections while improving accuracy \cite{yahaya2025hrp}, enabling application to graphs with billions of edges. Fast matrix multiplication algorithms for structured random matrices achieve log-linear time complexity for certain operations \cite{le2014fastfood}. The ability to perform one-time precomputation followed by efficient mini-batch training further enhances scalability \cite{hu2021rphgnn}.
+
+By eliminating redundant and noisy features, hierarchical feature selection reduces storage requirements and computational overhead in random projection pipelines\cite{wang2019hierarchical}. This efficiency enables deployment on resource-constrained environments and facilitates processing of massive graphs that exceed memory capacity of traditional methods.
+
+Enhanced robustness constitutes an additional benefit demonstrated across multiple domains. Random projections serve as effective regularizers that prevent overfitting and improve model generalization \cite{nguyen2016, cai2019enhanced}. For graph neural networks, HRP-based approaches exhibit greater resilience to adversarial perturbations and noisy graph structures compared to deterministic embedding methods \cite{nguyen2016}. The stochastic nature of random projections provides inherent defense against targeted attacks while maintaining representation quality.
+
+Flexibility and adaptability distinguish HRP from rigid deterministic methods. HRP provides a tunable combination of projection matrices \cite{yahaya2025hrp}, allowing users to control the distortion–efficiency trade-off across diverse application domains. While feature-adaptive projections have been demonstrated in biometric authentication systems \cite{yang2021cancelable}, extending such adaptivity to graph-structured data remains an open challenge.The hybrid framework accommodates domain-specific modifications, such as incorporating biometric security features in authentication systems or adjusting for heterogeneous node and edge types in complex networks \cite{yang2021cancelable, hu2021rphgnn}.
+
+Theoretical guarantees inherited from the Johnson-Lindenstrauss lemma provide confidence in HRP's distance preservation properties. While structural components introduce controlled deviations from pure randomness, carefully designed hybrid formulations maintain bounded distortion of pairwise distances with high probability \cite{johnson1984, yahaya2025hrp}. This theoretical foundation ensures that HRP methods rest on rigorous mathematical principles rather than purely empirical observations.
+
+The combination of these benefits positions HRP as a promising approach for advancing graph embedding techniques. By addressing the core limitations of traditional random projections-insufficient structural preservation and inflexibility to domain characteristics-while maintaining computational efficiency and theoretical guarantees, HRP offers a pathway toward more effective and scalable graph neural network systems. The following section examines empirical evidence for these advantages through detailed review of HRP applications in graph embedding tasks.
+
+% IEEE Conference Template - Literature on Graph Embedding and HRP
+\section{Literature on Graph Embedding and HRP}
+
+\subsection{Graph Embedding Techniques}
+
+Contemporary graph embedding methods leverage random projections to varying degrees, each exhibiting distinct characteristics in terms of scalability, structural preservation, and computational efficiency. DeepWalk established the random walk paradigm by treating graph traversals as sentences in a language model, applying Skip-Gram architectures to learn latent vertex representations \cite{perozzi2014}. The method demonstrates strong scalability through parallelizable online learning and achieves up to 10\% higher F1 scores than baseline methods on multi-label network classification when labeled data is sparse. However, DeepWalk requires substantial computation for random walk generation and lacks explicit mechanisms for preserving higher-order structural features beyond local neighborhoods.
+
+Node2vec \cite{grover2016node2vec} extends DeepWalk\cite{perozzi2014} by introducing biased random walks controlled by return and in-out parameters, enabling flexible exploration of graph structure. While this parameterization provides greater control over the breadth-first versus depth-first trade-off, it introduces additional hyperparameter tuning complexity and does not fundamentally address computational scalability limitations. GraphSAGE advances the field through inductive learning via neighborhood sampling and aggregation, supporting generalization to unseen nodes and enabling mini-batch training on large graphs \cite{khemani2024}. Addressing challenges in heterogeneous information networks, recent self-supervised GNN frameworks have been developed to enhance feature extraction. For example, Wei et al. propose a dual self-supervised hypergraph-based model that captures complex semantic and higher-order relationships without explicit labels, illustrating broader opportunities for scalable representation learning in heterogeneous graphs \cite{wei2024self}. Despite these advantages, GraphSAGE's sampling-based approach introduces variance in node representations and faces challenges with heterogeneous graphs containing diverse node and edge types.
+
+RandNE represents a significant advance in random projection-based graph embedding, employing iterative projections to preserve high-order proximities without expensive matrix factorizations \cite{zhang2018randne}. The method scales to billion-edge graphs while maintaining competitive performance in link prediction and node classification tasks. However, empirical studies reveal limitations in preserving community structures, particularly in heterogeneous networks where node similarities under random projections can exhibit pathological behavior \cite{tadic2024}. This structural degradation manifests as high distortion in certain graph configurations, limiting RandNE's effectiveness on complex real-world networks.
+
+SketchNE addresses scalability through combined sketching techniques and randomized singular value decomposition, achieving billion-scale network embedding in under one hour \cite{xie2023sketchne}. The method significantly outperforms DeepWalk and node2vec in both computational speed and embedding quality. FastRP provides even greater efficiency through sparse random projections combined with iterative feature propagation, though at potential cost to structural preservation \cite{chen2019fast}. These methods demonstrate that random projection-based approaches can achieve remarkable scalability, yet structural fidelity remains a persistent challenge.
+
+% Placeholder for performance comparison table
+\begin{table}[ht]
+\centering
+\caption{Comparison of Graph Embedding Methods Based on Key Properties}
+\label{tab:method_comparison}
+\begin{tabular}{lccc}
+% Top thick line
+\toprule 
+
+% Your Header Row
+\textbf{Method} & \textbf{Scalability} & \textbf{Structural Preservation} & \textbf{Cost} \\
+
+% The divider line between headers and data
+\midrule 
+
+% Data Rows
+DeepWalk & Medium & Medium & High \\
+Node2vec & Medium & Medium--High & High \\
+LINE & High & Low--Medium & Low \\
+RandNE & Very High & Medium & Very Low \\
+FastRP & Very High & Low--Medium & Very Low \\
+RpHGNN & High & High & Low--Medium \\
+RAP-GNN & High & Medium--High & Very Low \\
+
+% Bottom thick line
+\bottomrule 
+\end{tabular}
+\end{table}
+
+
+\subsection{HRP in Graph Embedding Tasks}
+
+Hybrid random projection methods specifically designed for graph embeddings exhibit promising characteristics that address limitations of traditional approaches. Random Projection Heterogeneous Graph Neural Networks (RpHGNN) compress heterogeneous graphs into regular-shaped tensors through random projections, enabling efficient mini-batch training \cite{hu2021rphgnn}. The method introduces Relation-wise Neighbor Collection and Even-odd Propagation Scheme components that maintain low information loss during training. Experimental results demonstrate up to 230\% speedup over traditional GNN methods while achieving state-of-the-art performance on several heterogeneous graph benchmarks. This work provides concrete evidence that hybrid approaches combining random projections with structural awareness can simultaneously improve both efficiency and accuracy.
+
+Random Propagation GNN (RAP-GNN) replaces all learnable message-passing weights with diagonal random matrices sampled on-the-fly, forming random graph propagation operators that eliminate the need for weight training while preserving competitive performance \cite{bui2023rap}.
+This counterintuitive approach achieves performance comparable to fully-trained GNNs while reducing training time by 6× and memory usage by 3×. The method addresses feature collapse issues through random graph propagation operators that maintain representation diversity. Theoretical and empirical evidence supports the effectiveness of random weights, suggesting that explicit weight learning may be unnecessary for certain graph learning tasks. This finding challenges conventional wisdom and opens new directions for efficient GNN design through HRP principles. Hardware-aware implementations have also emerged, such as Echo State Graph Neural Networks (ES-GNNs). These architectures integrate analogue random resistive memory arrays to achieve high energy efficiency and faster training on large-scale graphs \cite{wang2023echo}. Similarly, the RandONets framework demonstrates that shallow networks utilizing random projections can approximate complex linear and nonlinear operators effectively, challenging the necessity of deep architectures for certain learning tasks \cite{fabiani2023randonets}.
+
+Random projection forest initialization provides another HRP application for graph convolutional networks \cite{alshammari2020rpforest}. Unlike k-nearest neighbor graphs that assign equal weights to all edges and restrict neighbor counts, random projection trees create flexible graphs with variable edge weights based on appearance frequency across multiple trees. This approach allows nodes to connect to variable numbers of neighbors, improving adaptability to diverse graph structures. Spectral analysis provides an informative method for tuning tree counts, and empirical results demonstrate superior performance compared to standard k-NN initialization.
+
+Dynamic network embedding introduces severe computational challenges as graphs evolve over time. The Dynamic Adjacency Matrix Factorization (DAMF) algorithm addresses this by performing fast geometric updates-specifically, coordinate-axis rotations and basis scaling-to adjust node embeddings without recomputing the full factorization \cite{deng2023damf}. These incremental transformations allow DAMF to update billions of parameters in under 10 milliseconds, while preserving the structural consistency of the original embedding space. This demonstrates that carefully designed incremental update rules can provide real-time responsiveness for large-scale temporal graphs.
+
+Feature-adaptive random projection methods introduce a complementary hybrid dimension by generating projection matrices that depend on local data segments. In these systems, slot-wise adaptations tailor each projection to the underlying feature distribution, improving robustness to local variations and enhancing template security without increasing computational overhead \cite{yang2021cancelable}. While initially developed for biometric authentication, these techniques demonstrate broader applicability to graph embeddings where different graph regions may require distinct projection strategies. Hierarchical feature selection combined with random projections further refines this approach by identifying and prioritizing informative features before projection \cite{wang2019hierarchical}.
+
+\subsection{Performance Evaluation and Comparisons}
+
+Comparative evaluations across graph embedding methods reveal consistent patterns regarding HRP advantages and limitations.
+The following results are taken from the performance benchmarks reported in the FastRP study~\cite{chen2019fast}.
+
+\begin{table}[ht]
+\centering
+\caption{Macro-F1 Score Comparison of Embedding Algorithms on Three Benchmark Datasets}
+\label{tab:embedding_performance}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Algorithm} & \textbf{WWW-10K} & \textbf{BlogCatalog} & \textbf{Flickr} \\
+\midrule
+LINE      & 6.66   & 19.63  & 10.69 \\
+\textbf{node2vec} & \textbf{27.42} & 21.44  & 11.89 \\
+DeepWalk  & 25.54  & 21.30  & 14.00 \\
+RandNE    & 15.68  & 20.88  & 13.64 \\
+\textbf{FastRP}   & 26.92  & \textbf{23.43} & \textbf{15.02} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In node classification tasks on citation networks, random-projection-based GNNs such as RpHGNN achieve higher accuracy than traditional GNN baselines while retaining strong computational efficiency through projection-based feature compression \cite{hu2021rphgnn}. For link prediction, iterative random projection methods like RandNE deliver competitive performance with substantial speedups, enabling billion-scale graph embedding \cite{zhang2018randne}. However, recent analyses show that random projection methods can suffer degradation on graphs with highly skewed degree distributions or structural imbalance, where dot-product similarities become unreliable and ranking stability deteriorates \cite{tadic2024}
+
+Scalability assessments consistently favor random projection-based approaches. SketchNE's ability to embed billion-node graphs in under one hour represents orders-of-magnitude improvement over walk-based methods like DeepWalk \cite{xie2023sketchne}. Memory efficiency improvements are also observed in random-weight GNNs: RAP-GNN reports up to 3× lower memory usage than end-to-end trained GNNs by avoiding backpropagation through GNN layers while using diagonal random propagation operators\cite{bui2023rap}. These efficiency gains enable application to massive graphs that exceed capacity of traditional methods.
+
+Robustness evaluations demonstrate that random projection-based embeddings exhibit greater resilience to adversarial perturbations and noisy graph structures \cite{nguyen2016}. Models trained with RP regularization show improved generalization and reduced sensitivity to small input perturbations. However, systematic comparison of HRP methods against traditional approaches across diverse graph types and tasks remains limited, representing a significant gap in current literature.
+
+% IEEE Conference Template - Critical Evaluation of the Literature
+\section{Critical Evaluation of the Literature}
+
+\subsection{Coherence and Relevance}
+
+The reviewed literature demonstrates strong thematic coherence around the central challenge of scaling graph embeddings while preserving structural information. Papers addressing random projection theory \cite{johnson1984, achlioptas2003, blum2006} provide essential theoretical foundations that subsequent work on graph embeddings explicitly builds upon. The progression from classical RP methods through traditional graph embedding techniques to hybrid approaches follows a logical trajectory, with each contribution addressing limitations identified in prior work.
+
+However, subtle mismatches emerge between theoretical guarantees and empirical behavior in graph embeddings. While the Johnson-Lindenstrauss lemma provides rigorous bounds on distance preservation for random projections, recent analyses show that node similarities and ranking structure can still degrade significantly under random projections, revealing limitations of these guarantees for graph-structured data \cite{tadic2024}. This apparent contradiction suggests that distance preservation alone may be insufficient for maintaining graph-specific properties. While methods like HOPE demonstrate that preserving high-order asymmetric transitivity is critical for directed graph performance \cite{ou2016atp}, traditional random projections often fail to capture these complex directional dependencies. The literature would benefit from more explicit theoretical analysis of what structural properties can be guaranteed under random projections beyond pairwise distances.
+
+The relevance of surveyed work to HRP for graph embeddings varies considerably. Core papers on RpHGNN and RAP-GNN directly address hybrid methodologies for graph data \cite{hu2021rphgnn, bui2023rap}. In contrast, feature-adaptive random projection has primarily been explored in biometric authentication \cite{yang2021cancelable}, indicating that adaptivity in HRP has not yet been systematically extended to graph learning.
+Conversely, some reviewed work on random projections in neural networks, while informative about RP's general properties, provides limited specific guidance for graph embedding applications \cite{andras2018, cai2019enhanced}. A more focused literature on HRP specifically designed for graph-structured data would strengthen the field's theoretical and empirical foundations.
+
+\subsection{Depth and Breadth of Coverage}
+
+The literature provides comprehensive coverage of traditional random projection methods and their mathematical foundations. Multiple papers thoroughly examine RP theory, implementations, and applications across diverse domains \cite{xie2018survey, siddharth2017randpro}. Graph embedding techniques receive extensive treatment, with detailed analyses of DeepWalk, node2vec, and their variants \cite{perozzi2014, xie2017survey}. This breadth establishes solid context for understanding HRP's position within the broader landscape.
+
+However, coverage depth varies significantly across topics. While traditional RP methods are extensively documented, HRP-specific research remains relatively sparse. Yahaya et al.'s work on hybrid random projections represents one of few papers explicitly addressing HRP as a unified framework \cite{yahaya2025hrp}. Most other relevant work explores individual hybrid components-sparse matrices, feature selection, adaptive mechanisms-without comprehensive integration. This fragmentation hinders development of systematic understanding of HRP's full potential.
+
+Graph Neural Network architectures receive thorough treatment through comprehensive surveys \cite{khemani2024, gkarmpounis2024}, yet integration of RP methods into GNN frameworks remains underdeveloped. Papers on RpHGNN and RAP-GNN provide valuable case studies \cite{hu2021rphgnn, bui2023rap}, but systematic exploration of how different HRP designs interact with various GNN architectures is largely absent. This gap limits ability to provide principled guidance on matching HRP approaches to specific graph learning tasks.
+
+Benchmark evaluation presents another area of uneven coverage. While the Open Graph Benchmark provides standardized datasets and evaluation protocols \cite{hu2020ogb}, use of random projection techniques in graph learning, Hybrid Random Projection (HRP) remains largely unexplored, with only a single formulation introduced by Yahaya et al. \cite{yahaya2025hrp}. As a result, no systematic evaluations exist that compare HRP against other projection-based or neural embedding methods across diverse graph types. Existing studies typically benchmark random-projection approaches within their specific domains or datasets, making it difficult to assess the generalizability of hybrid projection strategies. This highlights a clear opportunity for comprehensive benchmarking that examines HRP alongside traditional graph embedding methods under consistent experimental settings.
+
+\subsection{Strengths and Weaknesses}
+
+The main strength of literature is the practical viability of random projection techniques in graph learning, though hybrid random projection (HRP) itself has only a single published implementation. Methods such as RpHGNN achieve significant speedups-reporting over a 230\% improvement in training efficiency while maintaining competitive accuracy-highlighting the broader potential of projection-based acceleration in graph neural models \cite{hu2021rphgnn}. RAP-GNN's competitive performance with random weights challenges assumptions about necessity of learned parameters \cite{bui2023rap}. SketchNE's billion-scale embedding capability establishes feasibility for massive graphs \cite{xie2023sketchne}. These empirical successes provide strong motivation for continued HRP research.
+
+Theoretical contributions establish rigorous foundations through the Johnson-Lindenstrauss lemma and its extensions \cite{johnson1984, achlioptas2003}. Papers connecting RP to margin theory, kernel approximation, and regularization provide multiple perspectives on why random projections succeed \cite{blum2006, nguyen2016}. This theoretical diversity enriches understanding and suggests multiple pathways for HRP advancement.
+
+Critical weaknesses include limited systematic comparison across methods. Most papers evaluate proposed techniques against small subsets of alternatives, often on domain-specific datasets that may not generalize. Absence of standardized evaluation protocols hampers fair comparison and reproducibility. Additionally, theoretical analysis of HRP's structural preservation properties lags behind empirical demonstrations, leaving uncertainty about performance guarantees.
+
+Another significant weakness involves insufficient exploration of failure modes. Tadić et al.'s work on pathological cases represents a rare exception in identifying conditions where random projections degrade node similarities \cite{tadic2024}. Most literature focuses on positive results without systematically characterizing scenarios where HRP underperforms or fails. Understanding limitations is essential for principled method selection and improvement.
+
+The literature also exhibits gaps in addressing dynamic and evolving graphs. While DAMF demonstrates real-time embedding updates \cite{deng2023damf}, broader investigation of HRP for temporal graphs remains limited. Similarly, treatment of heterogeneous graphs with diverse node and edge types, though addressed by RpHGNN \cite{hu2021rphgnn}, requires more extensive exploration given prevalence of such networks in practice.
+
+% IEEE Conference Template - Synthesis of Findings and Research Gaps
+\section{Synthesis of Findings and Research Gaps}
+
+\subsection{Key Findings Synthesis}
+
+The literature review reveals several consistent findings regarding Hybrid Random Projections for graph embeddings. First, computational efficiency emerges as a universal benefit across HRP implementations. Methods employing sparse random matrices, structured projections, or feature selection consistently demonstrate substantial speedups-ranging from 2× to 230×-compared to traditional approaches while maintaining competitive accuracy \cite{hu2021rphgnn, bui2023rap, xie2023sketchne}. This efficiency gain enables application to billion-scale graphs that exceed capacity of conventional methods.
+
+Second, the trade-off between structural preservation and computational cost remains central to graph embedding design. Traditional random projections sacrifice structural fidelity for speed, while pure deep learning approaches achieve high accuracy at prohibitive computational expense. HRP methods occupy a promising middle ground, incorporating structural awareness through hybrid components while retaining much of RP's computational advantage \cite{yahaya2025hrp}. However, optimal balance points depend on specific graph characteristics and application requirements, necessitating flexible frameworks that adapt to diverse scenarios.
+
+Third, theoretical guarantees from the Johnson-Lindenstrauss lemma provide essential foundations but prove insufficient for characterizing graph-specific structural preservation \cite{johnson1984, tadic2024}. Pairwise distance preservation does not automatically ensure retention of community structures, hierarchical relationships, or other higher-order graph properties critical for downstream tasks. This gap between theory and practice motivates development of extended theoretical frameworks specifically addressing graph structural properties under random projections.
+
+Fourth, sparse and structured random projections emerge as key enablers of efficient dimensionality reduction. 
+Achlioptas demonstrated that Johnson-Lindenstrauss embeddings can be realized using binary or highly sparse three-point projection matrices, allowing up to two-thirds of matrix entries to be zero while still preserving pairwise distances \cite{achlioptas2003}. 
+Complementing this, Alshammari et al. introduced random projection forests (rpForest) for GCN initialization, where random projection trees partition the feature space and edge weights are determined by how frequently node pairs co-occur in the same leaf, producing higher-quality graphs than kNN-based constructions \cite{alshammari2020rpforest}. 
+These findings suggest that future hybrid random projection methods may benefit from incorporating sparse or graph-aware structured operators.
+
+% Placeholder for research gaps diagram
+\begin{table}[ht]
+\centering
+\caption{Summary of Research Gaps in Hybrid Random Projections}
+\label{tab:research_gaps}
+% CHANGE: 'l' (no wrap) -> 'p{5.5cm}' (paragraph wrap)
+\begin{tabular}{l p{5.5cm}} 
+\toprule
+\textbf{Gap Category} & \textbf{Description} \\
+\midrule
+Benchmarking & Lack of systematic HRP comparison across datasets \\
+Theory & Insufficient analysis of structural preservation properties \\
+Adaptivity & Limited exploration of feature-adaptive HRP \\
+Architectures & Few integrations with advanced GNN models \\
+Scalability Limits & No characterization of HRP under extreme graph sizes \\
+Failure Cases & Pathological cases insufficiently explored \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Research Gaps}
+
+Despite progress documented in existing literature, several critical gaps impede advancement of HRP for graph embeddings. Most significantly, comprehensive benchmarking studies systematically comparing HRP variants against traditional methods across diverse graph types remain absent. While individual papers evaluate specific techniques on limited datasets, the field lacks unified evaluation frameworks employing standardized benchmarks like the Open Graph Benchmark with consistent metrics and realistic data splits \cite{hu2020ogb}. This gap prevents objective assessment of relative method strengths and hinders principled technique selection for specific applications.
+
+Theoretical understanding of HRP's structural preservation properties constitutes another major gap. Current theory focuses primarily on distance preservation through the Johnson-Lindenstrauss lemma, leaving questions about community structure, hierarchical relationships, and higher-order proximity preservation unanswered. Community-preserving models such as CPNE show that meso-scale structure can be encoded explicitly in the embedding objective \cite{wang2017cpne}, but these approaches are not based on random projections and do not enjoy JL-type efficiency guarantees. Tadić et al.'s identification of pathological cases for random projections on graphs highlights this theoretical deficit \cite{tadic2024}, yet comprehensive characterization of when and why HRP succeeds or fails in preserving graph structure remains unexplored. Development of formal bounds on structural distortion under hybrid projections would provide valuable guidance for method design.
+
+Limited exploration of HRP adaptivity represents a third significant gap. While feature-adaptive approaches demonstrate promise in biometric applications \cite{yang2021cancelable}, systematic investigation of adaptive HRP for diverse graph types-social networks, biological graphs, knowledge graphs-remains sparse. Questions about optimal adaptation strategies, computational trade-offs of adaptive mechanisms, and generalization across graph domains require thorough investigation. Hierarchical feature selection shows potential \cite{wang2019hierarchical}, but integration with graph-specific structural analysis needs development.
+
+The intersection of HRP with advanced GNN architectures presents another underexplored area. Existing work primarily focuses on basic GCN frameworks, with limited investigation of HRP integration with attention mechanisms, graph transformers, or specialized architectures for temporal or heterogeneous graphs. Understanding how HRP complements or conflicts with these advanced architectural components would inform design of next-generation graph learning systems.
+
+Scalability limits of current HRP implementations remain poorly characterized. While methods like SketchNE demonstrate billion-scale capability \cite{xie2023sketchne}, systematic analysis of scaling behavior, memory requirements, and computational bottlenecks across varying graph sizes and densities is lacking. Identifying fundamental scalability limits and developing techniques to push beyond them represents an important research direction.
+
+\subsection{Potential Contributions}
+
+This review identifies several high impact research opportunities. Conducting systematic benchmarking studies comparing HRP variants across Open Graph Benchmark datasets would establish performance baselines and inform method selection. Developing theoretical frameworks characterizing structural preservation under hybrid projections would ground empirical work in rigorous foundations. Exploring adaptive HRP mechanisms tailored to specific graph types could enable more effective application across diverse domains. Investigating HRP integration with advanced GNN architectures may unlock synergistic performance gains. Finally, characterizing and extending scalability limits would enable application to increasingly massive real-world networks. Addressing these gaps through rigorous empirical and theoretical research will advance graph embedding techniques and enhance practical graph learning systems.
+
+% IEEE Conference Template - Conclusion
+\section{Conclusion}
+
+\subsection{Summary of Findings}
+
+This literature review has systematically examined Hybrid Random Projections as a promising approach for enhancing graph embeddings in neural networks. Through analysis of multiple papers spanning random projection theory, graph embedding techniques, and GNN architectures, we have established that HRP addresses critical limitations of both traditional random projections and conventional graph embedding methods.
+
+Key findings show that HRP methods achieve substantial computational efficiency gains, up to 230\% speedup in some implementations-while maintaining or improving embedding accuracy compared to traditional approaches \cite{hu2021rphgnn, bui2023rap}. The integration of structured matrices and feature-adaptive components enable HRP to preserve structural properties of the graph more effectively than purely random projections while retaining much of their computational advantage \cite{yahaya2025hrp, wang2019hierarchical}. Methods like RandNE and SketchNE demonstrate that random projection-based approaches can scale to billion-edge graphs, establishing feasibility for massive real-world networks \cite{zhang2018randne, xie2023sketchne}.
+
+However, the review also identifies significant limitations in current research. Theoretical understanding of HRP's structural preservation properties lags behind experimental demonstrations, with distance preservation guarantees proving insufficient for characterizing retention of node similarities and ranking structure on graphs \cite{tadic2024}. Systematic benchmarking across different graph types using standardized evaluation protocols remains unexplored, hampering objective method comparison and principled technique selection. Integration of HRP with advanced GNN architectures and exploration of adaptive mechanisms for diverse graph domains require substantial further investigation.
+
+\subsection{Implications for Future Research}
+
+The findings in this review have important implications for advancing graph neural network research and practice. Most immediately, the demonstrated efficiency gains of HRP methods suggest that hybrid approaches deserve priority consideration when designing systems for large scale graph learning applications. Organizations working with social networks, biological databases, or knowledge graphs that consists of millions or billions of nodes can benefit from HRP's computational advantages while maintaining task performance.
+
+From a research perspective, the identified gaps highlight several high-priority directions. Comprehensive benchmarking studies employing Open Graph Benchmark datasets with realistic data splits would establish rigorous performance baselines and enable fair method comparison \cite{hu2020ogb}. Development of theoretical frameworks extending beyond pairwise distance preservation to characterize graph structural properties under hybrid projections would provide principled foundations for method design. Such frameworks should address community preservation, hierarchy retention, and higher-order proximity maintenance under various HRP configurations.
+
+Investigation of adaptive HRP mechanisms tailored to specific graph characteristics represents another promising direction. Feature-adaptive approaches have shown success in limited domains \cite{yang2021cancelable}, but systematic exploration across diverse graph types-social, biological, technological, knowledge-based-could reveal domain-specific optimization strategies. Understanding how to automatically configure HRP parameters based on graph properties would enhance practical applicability and reduce manual tuning requirements.
+
+The convergence of HRP with the development of GNN architectures requires a concentrated examination. As graph transformers, temporal GNNs, and specialized heterogeneous network models become more popular, it will be important to know how HRP works with or against these advanced parts in order to design the next generation of systems. HRP's efficiency and architectural innovations could work together to create performance levels that neither approach could reach on its own.
+
+Finally, figuring out the basic scalability limits of HRP implementations and coming up with ways to get past them will make it possible to use HRP on bigger and bigger networks. As real-world graphs get bigger and more complicated, methods that combine theoretical rigor, computational efficiency, and structural preservation will become very important for getting information out of graph-structured data.The convergence of HRP with nascent GNN architectures necessitates concentrated scrutiny. 
+
+This review lays the foundations for systematic investigation of Hybrid Random Projections as a key technique for advancing graph embeddings in neural networks. By identifying both the promise demonstrated in existing work and the gaps requiring attention, we provide a roadmap for research that can realize HRP's potential to enhance scalable, accurate, and practical graph learning systems.
+
+
+% Complete references section with all 40 papers
+\bibliographystyle{IEEEtran}
+\bibliography{ref}
+
+
+\vspace{3cm}
+
+\noindent\textbf{Approved:} \dotfill
+
+\vspace{0.4cm}
+
+\noindent Dr. Sampath Deegalla \\
+Department of Computer Engineering,\\
+Faculty of Engineering,\\
+University of Peradeniya,\\
+Sri Lanka.
+
+
+\end{document}
